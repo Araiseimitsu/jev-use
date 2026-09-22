@@ -2,13 +2,14 @@
 
 from app.services.page_state import (
     Element,
+    PageView,
     action_catalog,
-    credential_value,
     credentials_from_task,
     elements_from_raw,
     field_purpose,
     is_allowed_url,
     is_human_check,
+    needs_user_input,
     rank_elements,
     redact_secrets,
     request_line,
@@ -84,15 +85,16 @@ def test_login_lines_stay_out_of_the_request() -> None:
 
     assert credentials_from_task(task) == ("alice", "secret-value")
     assert request_line(task) == "スケジュールが面で今日のすべての予定を教えて"
-    assert "secret-value" not in redact_secrets(task, "")
-    assert field_purpose(Element("e1", "textbox", "ユーザー名", "type")) == "username"
-    assert field_purpose(Element("e2", "textbox", "パスワード", "type", "password")) == "password"
-    assert credential_value(Element("e1", "textbox", "ユーザー名", "type"), task, "ui-user", "") == "ui-user"
-    assert (
-        credential_value(Element("e2", "textbox", "", "type", "password"), task, "", "ui-pass")
-        == "ui-pass"
-    )
-    assert credential_value(Element("e3", "searchbox", "検索", "type"), task, "ui-user", "ui-pass") is None
+    assert "secret-value" not in redact_secrets(task)
+    username = Element("e1", "textbox", "ユーザー名", "type")
+    password = Element("e2", "textbox", "パスワード", "type", "password")
+    assert field_purpose(username) == "username"
+    assert field_purpose(password) == "password"
+    login = PageView("https://example.com/login", "ログイン", "", (username, password))
+    assert needs_user_input(login) is True
+    offered = {option.id for option in action_catalog((username, password), defer_login=True)}
+    assert "type:e1" not in offered
+    assert "type:e2" not in offered
 
 
 def test_password_input_type_is_kept() -> None:
@@ -111,7 +113,6 @@ def test_password_input_type_is_kept() -> None:
 
     assert elements[0].autocomplete == "username"
     assert field_purpose(elements[0]) == "username"
-    assert credential_value(elements[0], "予定を教えて", "alice", "secret") == "alice"
 
 
 def test_bullet_login_template_separates_the_request() -> None:

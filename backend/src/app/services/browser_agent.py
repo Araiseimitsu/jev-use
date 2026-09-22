@@ -113,7 +113,7 @@ class BrowserAgentRunner:
         self._approval_event.set()
 
     def mark_human_ready(self) -> None:
-        """確認画面を人が済ませたと伝えて、待ちを終わらせる。"""
+        """確認や手入力が終わったと伝えて、待ちを終わらせる。"""
         self._human_ready.set()
 
     def validation_error(self) -> str | None:

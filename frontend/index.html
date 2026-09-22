@@ -15,7 +15,7 @@
     <main>
       <h1>ブラウザに調べものを任せる</h1>
       <p class="lede">
-        開いたページのボタンと入力欄を読み、次に押す場所を選んで実行します。別のウィンドウで Chromium が開きます。
+        開いたページのボタンと入力欄を読み、次に押す場所を選んで実行します。別のウィンドウで Chromium が開きます。ログインなど自動では入れられない項目は、そのウィンドウで入力して「続行」を押します。
       </p>
 
       <form id="task-form">
@@ -26,26 +26,6 @@
           placeholder="例: Googleで東京の明日の天気を調べて、最高気温を教えて"
           autofocus
         ></textarea>
-        <div class="credentials">
-          <div>
-            <label for="username-input">ユーザー名</label>
-            <input
-              id="username-input"
-              type="text"
-              autocomplete="username"
-              placeholder="ログインが要るときだけ"
-            />
-          </div>
-          <div>
-            <label for="password-input">パスワード</label>
-            <input
-              id="password-input"
-              type="password"
-              autocomplete="current-password"
-              placeholder="ログインが要るときだけ"
-            />
-          </div>
-        </div>
         <div class="presets">
           <button type="button" data-preset="Googleで東京の明日の天気を調べて、最高気温を教えて">
             明日の天気
@@ -68,6 +48,7 @@
       <section id="run" hidden>
         <p id="page-line" class="page-line"></p>
         <p id="human-check" class="confirm" hidden></p>
+        <p id="user-input" class="confirm" hidden></p>
         <button type="button" id="human-ready-btn" class="quiet" hidden>確認できた</button>
         <img id="preview" alt="開いているページ" hidden />
         <ol id="steps"></ol>

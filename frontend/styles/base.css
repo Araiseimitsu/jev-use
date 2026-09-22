@@ -76,8 +76,7 @@ label {
   font-weight: 600;
 }
 
-textarea,
-.credentials input {
+textarea {
   width: 100%;
   min-height: 112px;
   padding: 14px 16px;
@@ -91,20 +90,7 @@ textarea,
   resize: vertical;
 }
 
-.credentials {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-  margin-top: 12px;
-}
-
-.credentials input {
-  min-height: 48px;
-  resize: none;
-}
-
 textarea:focus,
-.credentials input:focus,
 button:focus-visible {
   outline: none;
   border-color: var(--accent);
@@ -174,6 +160,8 @@ button:focus-visible {
   color: var(--ink);
 }
 
+#human-ready-btn { margin-top: 12px; }
+
 #run { margin-top: 36px; }
 
 .page-line {
@@ -228,7 +216,6 @@ button:focus-visible {
 @media (max-width: 640px) {
   h1 { font-size: 32px; }
   .top { padding: 16px 20px; }
-  .credentials { grid-template-columns: 1fr; }
   .actions { flex-direction: column; }
   #run-btn, #stop-btn, #approve-btn, #deny-btn { width: 100%; }
 }

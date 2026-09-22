@@ -159,10 +159,8 @@ def test_type_action_fills_the_field_and_submits_search() -> None:
     assert session.actions[0] == ("fill", "e1", "東京 天気", True)
 
 
-def test_login_fields_receive_credentials_not_the_request() -> None:
-    import json
-
-    login = PageView(
+def _login_view() -> PageView:
+    return PageView(
         url="https://example.com/login",
         title="ログイン",
         excerpt="ログイン",
@@ -171,9 +169,14 @@ def test_login_fields_receive_credentials_not_the_request() -> None:
             Element("e2", "textbox", "パスワード", "type", "password"),
         ),
     )
-    session = FakeSession(login)
-    writer = FakeWriter()
-    decider = ScriptedDecider([_decision("type:e1"), _decision("type:e2"), _decision("done", done=0.9)])
+
+
+def test_login_page_waits_for_the_person_then_continues(monkeypatch) -> None:
+    import json
+
+    monkeypatch.setattr(settings, "human_check_timeout_seconds", 5)
+    session = FakeSession(_login_view())
+    session.later = PageView("https://example.com/home", "予定", "今日の予定", ())
     runner = BrowserAgentRunner(
         task=(
             "https://example.com/login\n"
@@ -181,22 +184,28 @@ def test_login_fields_receive_credentials_not_the_request() -> None:
             "パスワード: pasted-secret\n"
             "- スケジュールが面で今日のすべての予定を教えて"
         ),
-        username="alice",
-        password="field-secret",
         max_steps=4,
-        decider=decider,  # type: ignore[arg-type]
-        writer=writer,  # type: ignore[arg-type]
+        headless=False,
+        decider=ScriptedDecider([_decision("done", done=0.9)]),  # type: ignore[arg-type]
+        writer=FakeWriter(),  # type: ignore[arg-type]
         session_factory=lambda: session,
     )
 
     events = _events(runner)
     dumped = json.dumps(events, ensure_ascii=False)
 
-    assert session.actions == [("fill", "e1", "alice", False), ("fill", "e2", "field-secret", False)]
-    assert writer.phrase_tasks == []
-    assert "field-secret" not in dumped
+    assert session.actions == []
+    assert any(event["event"] == "user_input" and event["data"]["active"] for event in events)
     assert "pasted-secret" not in dumped
-    assert all("field-secret" not in task and "pasted-secret" not in task for task in decider.tasks)
+    assert events[-1]["data"]["result"] == "晴れ、25度"
+
+
+def test_headless_login_stops_without_typing() -> None:
+    session = FakeSession(_login_view())
+    events = _events(_runner(session, [_decision("type:e1")], headless=True))
+
+    assert session.actions == []
+    assert "人が入力しないと先に進めません" in events[-1]["data"]["result"]
 
 
 def test_other_fields_get_the_request_line() -> None:
@@ -204,7 +213,6 @@ def test_other_fields_get_the_request_line() -> None:
     writer = FakeWriter()
     runner = BrowserAgentRunner(
         task="https://example.com\nパスワード: pasted-secret\n- 今日の予定を教えて",
-        password="pasted-secret",
         max_steps=3,
         decider=ScriptedDecider([_decision("type:e1"), _decision("done", done=0.9)]),  # type: ignore[arg-type]
         writer=writer,  # type: ignore[arg-type]
@@ -217,18 +225,34 @@ def test_other_fields_get_the_request_line() -> None:
     assert session.actions[0] == ("fill", "e1", "東京 天気", True)
 
 
-def test_missing_password_stops_without_typing() -> None:
-    login = PageView(
-        url="https://example.com/login",
-        title="ログイン",
-        excerpt="",
-        elements=(Element("e1", "textbox", "パスワード", "type", "password"),),
-    )
-    session = FakeSession(login)
-    events = _events(_runner(session, [_decision("type:e1")]))
+def test_stuck_page_resumes_after_the_person_continues(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "human_check_timeout_seconds", 5)
+    session = FakeSession(VIEW)
+    runner = _runner(session, [_decision("wait", used_fallback=True, message="選べませんでした。"), _decision("done", done=0.9)], headless=False)
 
-    assert session.actions == []
-    assert events[-1]["data"]["result"] == "パスワードが指定されていません。画面の入力欄に入れてから実行してください。"
+    async def collect() -> list[dict]:
+        found = []
+
+        async def continue_when_asked() -> None:
+            for _ in range(50):
+                await asyncio.sleep(0.05)
+                if runner._human_ready.is_set() is False and any(
+                    event["event"] == "user_input" and event["data"]["active"] for event in found
+                ):
+                    runner.mark_human_ready()
+                    return
+            runner.mark_human_ready()
+
+        waiter = asyncio.create_task(continue_when_asked())
+        async for event in runner.run_stream():
+            found.append(event)
+        await waiter
+        return found
+
+    events = asyncio.run(collect())
+
+    assert any(event["event"] == "user_input" and event["data"]["active"] for event in events)
+    assert events[-1]["data"]["result"] == "晴れ、25度"
 
 
 def test_high_risk_without_approval_does_not_click(monkeypatch) -> None:
@@ -246,7 +270,11 @@ def test_high_risk_without_approval_does_not_click(monkeypatch) -> None:
 def test_fallback_stops_without_an_action() -> None:
     session = FakeSession(VIEW)
     events = _events(
-        _runner(session, [_decision("wait", used_fallback=True, message="選べませんでした。")])
+        _runner(
+            session,
+            [_decision("wait", used_fallback=True, message="選べませんでした。")],
+            headless=True,
+        )
     )
 
     assert session.actions == []
@@ -264,7 +292,7 @@ def test_closed_browser_is_explained_in_japanese() -> None:
 def test_same_action_three_times_stops() -> None:
     session = FakeSession(VIEW)
     click = _decision("click:e2")
-    events = _events(_runner(session, [click, click, click, click]))
+    events = _events(_runner(session, [click, click, click, click], headless=True))
 
     assert session.actions == [("click", "e2"), ("click", "e2")]
     assert "繰り返して" in events[-1]["data"]["result"]

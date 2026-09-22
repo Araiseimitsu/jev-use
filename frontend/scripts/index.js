@@ -3,8 +3,6 @@ import { getJson, postJson, postSseStream } from "./api.js";
 const systemStatus = document.querySelector("#system-status");
 const form = document.querySelector("#task-form");
 const taskInput = document.querySelector("#task-input");
-const usernameInput = document.querySelector("#username-input");
-const passwordInput = document.querySelector("#password-input");
 const runBtn = document.querySelector("#run-btn");
 const stopBtn = document.querySelector("#stop-btn");
 const confirm = document.querySelector("#confirm");
@@ -12,6 +10,7 @@ const formNote = document.querySelector("#form-note");
 const run = document.querySelector("#run");
 const pageLine = document.querySelector("#page-line");
 const humanCheck = document.querySelector("#human-check");
+const userInput = document.querySelector("#user-input");
 const humanReadyBtn = document.querySelector("#human-ready-btn");
 const preview = document.querySelector("#preview");
 const steps = document.querySelector("#steps");
@@ -97,13 +96,9 @@ async function startRun(task) {
   systemStatus.textContent = "実行中";
 
   abortController = new AbortController();
-  const body = { task };
-  const username = usernameInput.value.trim();
-  if (username) body.username = username;
-  if (passwordInput.value) body.password = passwordInput.value;
   await postSseStream(
     "/browser/run",
-    body,
+    { task },
     onEvent,
     (error) => {
       formNote.textContent = error.message;
@@ -128,10 +123,9 @@ function onEvent(event) {
   } else if (event.event === "step") {
     appendStep(data);
   } else if (event.event === "human_check") {
-    humanCheck.hidden = !data.active;
-    humanReadyBtn.hidden = !data.active;
-    humanCheck.textContent = data.message || "";
-    systemStatus.textContent = data.active ? "確認待ち" : "実行中";
+    showPause(humanCheck, data, "確認できた", "確認待ち");
+  } else if (event.event === "user_input") {
+    showPause(userInput, data, "続行", "入力待ち");
   } else if (event.event === "confirm_request") {
     approval.hidden = false;
     approvalText.textContent = data.reason || "この操作を実行しますか？";
@@ -163,13 +157,24 @@ function appendStep(data) {
   steps.append(item);
 }
 
+function showPause(messageEl, data, buttonLabel, waitingStatus) {
+  const active = Boolean(data.active);
+  messageEl.hidden = !active;
+  messageEl.textContent = data.message || "";
+  humanReadyBtn.hidden = !active;
+  humanReadyBtn.textContent = buttonLabel;
+  systemStatus.textContent = active ? waitingStatus : "実行中";
+}
+
 function finish(status) {
   runBtn.disabled = false;
   runBtn.textContent = "実行する";
   stopBtn.hidden = true;
   approval.hidden = true;
   humanCheck.hidden = true;
+  userInput.hidden = true;
   humanReadyBtn.hidden = true;
+  humanReadyBtn.textContent = "確認できた";
   if (result.hidden && !steps.childElementCount) run.hidden = true;
   if (systemStatus.textContent === "実行中") systemStatus.textContent = status;
   abortController = null;

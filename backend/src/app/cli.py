@@ -67,6 +67,13 @@ def print_event(event: dict[str, Any], runner: BrowserAgentRunner) -> None:
             )
     elif ev_type == "human_check" and data.get("active"):
         print(f"\n[確認] {data.get('message')}")
+    elif ev_type == "user_input" and data.get("active"):
+        print(f"\n[入力] {data.get('message')}")
+        try:
+            input("  終わったら Enter: ")
+        except EOFError:
+            pass
+        runner.mark_human_ready()
     elif ev_type == "confirm_request":
         print(f"\n[確認] Step {data.get('step')}")
         action = data.get("action") or {}
@@ -92,8 +99,6 @@ async def main() -> None:
     parser.add_argument("--max-steps", type=int, default=None, help="最大ステップ数")
     parser.add_argument("--headless", action="store_true", help="ブラウザを表示しない")
     parser.add_argument("--yes", action="store_true", help="実行前の確認を省略する")
-    parser.add_argument("--username", default="", help="ログインのユーザー名")
-    parser.add_argument("--password", default="", help="ログインのパスワード。画面には出さない")
     args = parser.parse_args()
 
     if not settings.typesafe_api_key.strip():
@@ -103,7 +108,7 @@ async def main() -> None:
         )
         sys.exit(1)
 
-    assessment = await TaskAssessor().assess(redact_secrets(args.task, args.password))
+    assessment = await TaskAssessor().assess(redact_secrets(args.task))
     print_assessment(assessment)
     if assessment.requires_confirmation and not args.yes:
         for reason in assessment.reasons:
@@ -117,10 +122,8 @@ async def main() -> None:
         task=args.task,
         max_steps=max_steps,
         headless=True if args.headless else None,
-        username=args.username,
-        password=args.password,
     )
-    visible_task = redact_secrets(args.task, args.password)
+    visible_task = redact_secrets(args.task)
     final_event: dict[str, Any] | None = None
     async for event in runner.run_stream():
         print_event(event, runner)

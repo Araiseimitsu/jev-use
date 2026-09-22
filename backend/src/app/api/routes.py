@@ -24,8 +24,6 @@ ACTIVE_RUNS: dict[str, BrowserAgentRunner] = {}
 class RunRequest(BaseModel):
     task: str = Field(..., description="実行する指示")
     max_steps: int | None = Field(default=None, ge=1, le=MAX_STEPS_LIMIT, description="最大ステップ数")
-    username: str = Field(default="", description="ログインのユーザー名。空なら指示文から読む")
-    password: str = Field(default="", description="ログインのパスワード。空なら指示文から読む")
 
 
 class AssessRequest(BaseModel):
@@ -100,7 +98,7 @@ def get_config() -> ConfigResponse:
 async def assess_browser_task(request: AssessRequest) -> dict[str, object]:
     """実行前に危険度・具体性・実現性・ステップ数を見積もる。"""
     task = _require_task(request.task)
-    assessment = await TaskAssessor().assess(redact_secrets(task, ""))
+    assessment = await TaskAssessor().assess(redact_secrets(task))
     return assessment.to_dict()
 
 
@@ -114,11 +112,9 @@ async def run_browser_task(request: RunRequest) -> EventSourceResponse:
     runner = BrowserAgentRunner(
         task=task,
         max_steps=request.max_steps,
-        username=request.username,
-        password=request.password,
     )
     ACTIVE_RUNS[run_id] = runner
-    visible_task = redact_secrets(task, request.password)
+    visible_task = redact_secrets(task)
 
     async def event_generator() -> AsyncGenerator[dict[str, str], None]:
         try:
@@ -151,6 +147,6 @@ def approve_browser_action(run_id: str, request: ApprovalRequest) -> dict[str, o
 
 @router.post("/browser/human-ready/{run_id}")
 def mark_browser_human_ready(run_id: str) -> dict[str, str]:
-    """「人間ですか？」の確認を、人が済ませたと伝える。"""
+    """確認や手入力が終わったと伝え、待ちを終わらせる。"""
     _active_runner(run_id).mark_human_ready()
     return {"status": "ready", "run_id": run_id}

@@ -12,7 +12,7 @@ from app.services.page_state import PageView, page_view_from_raw
 
 logger = logging.getLogger(__name__)
 
-# 画面上の操作できる要素を id 付きで返す。パスワード欄も含め、値は呼び出し側が入れる。
+# 画面上の操作できる要素を id 付きで返す。パスワード欄も見つけ、入力は人が行う。
 READ_SCRIPT = """
 () => {
   const selector = [

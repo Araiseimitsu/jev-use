@@ -1,4 +1,4 @@
-# Jev
+# jev-use
 
 Web ブラウザのページを読み、次の操作を選んで実行するアプリです。
 FastAPI が画面と API を出し、ターミナルからも実行できます。
@@ -39,14 +39,7 @@ uv run playwright install chromium
 ```
 
 `backend/.env.example` を `backend/.env` にコピーし、`TYPESAFE_API_KEY` を設定します。
-
-```env
-TYPESAFE_API_KEY=tys_...
-TYPESAFE_MODEL=jev-latest
-GEMINI_API_KEY=
-GEMINI_MODEL=gemini-2.5-flash
-BROWSER_HEADLESS=false
-```
+`GEMINI_API_KEY` は任意です。その他の項目と既定値は `.env.example` のコメントを参照してください。
 
 ## 起動
 
@@ -56,7 +49,20 @@ uv run uvicorn app.main:app --reload --app-dir src
 ```
 
 ブラウザで [http://127.0.0.1:8000](http://127.0.0.1:8000) を開きます。
-Windows ではプロジェクトルートの `start.ps1` でも起動できます。
+Windows ではプロジェクトルートの `start.cmd`（または `start.ps1`）でも起動できます（ポート 8010、同じ LAN の端末からも接続できる設定で起動します）。バックグラウンドで常駐するため、ウィンドウはすぐ閉じます。
+
+### 停止
+
+`start.cmd` で起動した Backend はタスクマネージャーではなく、以下のいずれかで停止します。
+
+```powershell
+# ポート 8010 を使っているプロセスを停止
+Get-NetTCPConnection -LocalPort 8010 -State Listen | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }
+```
+
+またはタスクマネージャーで `python.exe`（uvicorn を起動しているもの）を終了します。
+
+### ターミナルから実行
 
 ```powershell
 cd backend
@@ -66,6 +72,7 @@ uv run python -m app.cli "https://example.com の内容を教えて" --headless 
 ```
 
 `--yes` は実行前の確認を省略します。操作の途中で危険と判断されたときは、その場で聞きます。
+`--max-steps` は 1〜50 で指定します（画面の API と同じ上限）。
 
 ## 検証
 

@@ -4,7 +4,6 @@ from app.services.page_state import (
     Element,
     PageView,
     action_catalog,
-    credentials_from_task,
     elements_from_raw,
     field_purpose,
     is_allowed_url,
@@ -83,7 +82,6 @@ def test_login_lines_stay_out_of_the_request() -> None:
         "- スケジュールが面で今日のすべての予定を教えて"
     )
 
-    assert credentials_from_task(task) == ("alice", "secret-value")
     assert request_line(task) == "スケジュールが面で今日のすべての予定を教えて"
     assert "secret-value" not in redact_secrets(task)
     username = Element("e1", "textbox", "ユーザー名", "type")
@@ -124,5 +122,23 @@ def test_bullet_login_template_separates_the_request() -> None:
         "- スケジュールが面で今日のすべての予定を教えて"
     )
 
-    assert credentials_from_task(task) == ("alice", "secret-value")
     assert request_line(task) == "スケジュールが面で今日のすべての予定を教えて"
+
+
+def test_every_password_line_is_redacted() -> None:
+    task = "パスワード: first-secret\npassword: second-secret\n- 予定を教えて"
+
+    redacted = redact_secrets(task)
+
+    assert "first-secret" not in redacted
+    assert "second-secret" not in redacted
+    assert "予定を教えて" in redacted
+
+
+def test_short_password_does_not_rewrite_other_text() -> None:
+    task = "https://example.com/a\nパスワード: a\n- 予定を見て"
+
+    redacted = redact_secrets(task)
+
+    assert "https://example.com/a" in redacted
+    assert "パスワード: ［パスワード］" in redacted

@@ -24,6 +24,8 @@ _PASS_LINE = re.compile(
 )
 _USERNAME_HINTS = ("ユーザー", "ユーザ", "username", "user name", "login", "ログイン", "アカウント", "email", "e-mail", "メール")
 _PASSWORD_HINTS = ("password", "passwd", "パスワード")
+_SECRET_MASK = "［パスワード］"
+_MIN_SECRET_LENGTH = 4
 
 # サイトが人の操作を求めて出している確認画面。本文の偶然の一致を避けるため、文言は確認画面に特有なものだけにする。
 _HUMAN_CHECK_PHRASES = (
@@ -224,13 +226,6 @@ def field_purpose(element: Element) -> str:
     return "text"
 
 
-def credentials_from_task(task: str) -> tuple[str, str]:
-    """指示文に書かれたユーザー名とパスワードを取り出す。無ければ空文字。"""
-    user = _USER_LINE.search(task)
-    password = _PASS_LINE.search(task)
-    return (user.group(1) if user else "", password.group(1) if password else "")
-
-
 def request_line(task: str) -> str:
     """ログイン情報と URL を除いた、最後の依頼文。"""
     lines: list[str] = []
@@ -246,7 +241,15 @@ def request_line(task: str) -> str:
 
 def redact_secrets(task: str) -> str:
     """モデルへ渡す文から、指示に書かれたパスワードの実値を消す。"""
-    _, parsed = credentials_from_task(task)
-    if not parsed:
+    secrets = {match.group(1) for match in _PASS_LINE.finditer(task)}
+    if not secrets:
         return task
-    return task.replace(parsed, "［パスワード］")
+    # パスワード行の値は長さに関わらず消す（値は正規表現の末尾にある）
+    redacted = _PASS_LINE.sub(
+        lambda m: m.group(0)[: m.start(1) - m.start(0)] + _SECRET_MASK, task
+    )
+    # 同じ値が別の行に書かれていても消す。短い値は URL などを壊すため対象外にする。
+    for secret in sorted(secrets, key=len, reverse=True):
+        if len(secret) >= _MIN_SECRET_LENGTH:
+            redacted = redacted.replace(secret, _SECRET_MASK)
+    return redacted

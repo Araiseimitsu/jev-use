@@ -15,6 +15,7 @@ import httpx
 
 from app.core.config import settings
 from app.services.browser_session import BrowserSession
+from app.services.jev.asker import MISSING_KEY_MESSAGE
 from app.services.jev.browser_decider import BrowserDecider, Decision
 from app.services.page_state import (
     ActionOption,
@@ -118,10 +119,7 @@ class BrowserAgentRunner:
 
     def validation_error(self) -> str | None:
         if not self.decider.enabled:
-            return (
-                "TypeSafe API キーが未設定です。"
-                "backend/.env に TYPESAFE_API_KEY を設定してください。"
-            )
+            return MISSING_KEY_MESSAGE
         url = start_url(self.task)
         if not is_allowed_url(url):
             return "開いてよい URL ではありません。http または https を指定してください。"
@@ -152,12 +150,13 @@ class BrowserAgentRunner:
         queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
 
         def emit(item: dict[str, Any] | None) -> None:
-            main_loop.call_soon_threadsafe(queue.put_nowait, item)
-
-        worker_loop: asyncio.AbstractEventLoop | None = None
+            try:
+                main_loop.call_soon_threadsafe(queue.put_nowait, item)
+            except RuntimeError:
+                # 受け取り側のループが先に閉じた。イベントは捨て、後片付けは続ける。
+                pass
 
         def run_worker() -> None:
-            nonlocal worker_loop
             if sys.platform == "win32":
                 worker_loop = asyncio.ProactorEventLoop()
             else:
@@ -181,8 +180,10 @@ class BrowserAgentRunner:
                     break
                 yield item
         finally:
-            if thread.is_alive() and worker_loop is not None and worker_loop.is_running():
-                worker_loop.call_soon_threadsafe(worker_loop.stop)
+            # 画面の停止や切断で受け取りが途中で終わっても、ループは止めずに停止要求だけ出す。
+            # ループを強制的に止めるとブラウザを閉じる処理が走らず、プロフィールが使用中のまま残る。
+            if thread.is_alive():
+                self.request_stop()
 
     async def _execute(self, emit: Emit) -> None:
         started = time.monotonic()

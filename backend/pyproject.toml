@@ -1,5 +1,5 @@
 [project]
-name = "app-backend"
+name = "jev-use-backend"
 version = "0.1.0"
 description = "DOM を読んで Jev が次の操作を選び、Playwright が実行するブラウザエージェント"
 requires-python = ">=3.13"

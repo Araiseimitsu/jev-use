@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 MESSAGE_LIMIT = 140
 
 #: 通知のタイトル（アプリ名）
-APP_ID = "Jev"
+APP_ID = "jev-use"
 
 #: 実行モードの日本語表示名
 MODE_LABELS: dict[str, str] = {

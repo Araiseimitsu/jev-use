@@ -11,6 +11,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from app.core.config import settings
 from app.services.browser_agent import BrowserAgentRunner
+from app.services.jev.asker import MISSING_KEY_MESSAGE
 from app.services.jev.task_assessor import MAX_STEPS_LIMIT, TaskAssessor
 from app.services.notifier import notify_browser_event
 from app.services.page_state import redact_secrets
@@ -51,20 +52,17 @@ def _require_task(task: str) -> str:
     return cleaned
 
 
+def _typesafe_enabled() -> bool:
+    return bool(settings.typesafe_api_key.strip())
+
+
 def _require_typesafe() -> None:
-    if not settings.typesafe_api_key.strip():
-        raise HTTPException(
-            status_code=400,
-            detail="TypeSafe API キーが未設定です。backend/.env に TYPESAFE_API_KEY を設定してください。",
-        )
+    if not _typesafe_enabled():
+        raise HTTPException(status_code=400, detail=MISSING_KEY_MESSAGE)
 
 
 def _to_sse(event: dict[str, Any]) -> dict[str, str]:
     return {"event": event["event"], "data": json.dumps(event["data"], ensure_ascii=False)}
-
-
-def _notify_if_finished(event: dict[str, Any], task: str, mode: str) -> None:
-    notify_browser_event(event, task, mode)
 
 
 def _active_runner(run_id: str) -> BrowserAgentRunner:
@@ -83,7 +81,7 @@ def health() -> dict[str, str]:
 def get_config() -> ConfigResponse:
     return ConfigResponse(
         default_max_steps=settings.default_max_steps,
-        typesafe_enabled=TaskAssessor().enabled,
+        typesafe_enabled=_typesafe_enabled(),
         text_enabled=bool(settings.gemini_api_key.strip()),
         headless=settings.browser_headless,
     )
@@ -119,7 +117,7 @@ async def run_browser_task(request: RunRequest) -> EventSourceResponse:
                 if event["event"] == "start":
                     data["run_id"] = run_id
                 enriched = {"event": event["event"], "data": data}
-                _notify_if_finished(enriched, visible_task, runner.mode)
+                notify_browser_event(enriched, visible_task, runner.mode)
                 yield _to_sse(enriched)
         finally:
             ACTIVE_RUNS.pop(run_id, None)

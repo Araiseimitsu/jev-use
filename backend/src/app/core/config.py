@@ -20,7 +20,7 @@ class Settings(BaseSettings):
 
     gemini_api_key: str = ""
     # 入力文と最終回答の文章だけに使う（画面の判断には使わない）
-    gemini_model: str = "gemini-2.5-flash"
+    gemini_model: str = "gemini-3.5-flash-lite"
     default_max_steps: int = 15
     # ブラウザを表示せずに操作するか
     browser_headless: bool = False

@@ -104,11 +104,11 @@ def test_route_notifies_on_complete(monkeypatch) -> None:
 
     monkeypatch.setattr("app.services.notifier.TaskNotifier", lambda: _FakeNotifier())
 
-    routes._notify_if_finished(
+    routes.notify_browser_event(
         {"event": "complete", "data": {"result": "完了しました"}}, "テスト", "browser"
     )
-    routes._notify_if_finished({"event": "start", "data": {}}, "テスト", "browser")
-    routes._notify_if_finished(
+    routes.notify_browser_event({"event": "start", "data": {}}, "テスト", "browser")
+    routes.notify_browser_event(
         {"event": "error", "data": {"message": "失敗"}}, "テスト", "browser"
     )
 

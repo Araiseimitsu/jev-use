@@ -1,16 +1,21 @@
 // API 呼び出しの共通処理。URL と共通エラー処理をここに集約する。
 const API_BASE = "/api";
 
+// 失敗した応答を、FastAPI の detail（無ければ HTTP ステータス）を載せた Error にする
+async function responseError(response) {
+  const errorData = await response.json().catch(() => null);
+  const detail = errorData?.detail;
+  // 入力検証エラー（422）の detail は配列で返る
+  const message = typeof detail === "string" ? detail : `エラー: HTTP ${response.status} ${response.statusText}`;
+  return new Error(message);
+}
+
 export async function getJson(path) {
   const response = await fetch(`${API_BASE}${path}`, {
     headers: { Accept: "application/json" },
   });
 
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => null);
-    const msg = errorData?.detail || `API error: ${response.status} ${response.statusText}`;
-    throw new Error(msg);
-  }
+  if (!response.ok) throw await responseError(response);
 
   return response.json();
 }
@@ -30,11 +35,7 @@ export async function postJson(path, payload = {}) {
     body: JSON.stringify(payload),
   });
 
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => null);
-    const msg = errorData?.detail || `API error: ${response.status} ${response.statusText}`;
-    throw new Error(msg);
-  }
+  if (!response.ok) throw await responseError(response);
 
   return response.json();
 }
@@ -59,11 +60,7 @@ export async function postSseStream(path, payload, onEvent, onError, signal) {
       signal,
     });
 
-    if (!response.ok) {
-      const errJson = await response.json().catch(() => null);
-      const msg = errJson?.detail || `エラー: HTTP ${response.status} ${response.statusText}`;
-      throw new Error(msg);
-    }
+    if (!response.ok) throw await responseError(response);
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder("utf-8");

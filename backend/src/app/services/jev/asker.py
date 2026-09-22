@@ -10,6 +10,9 @@ from typing import Any, Protocol
 
 from app.core.config import settings
 
+# 操作の選択に Jev が必須なため、キーが無いと実行を始めない（API・CLI・ランナーで共通）
+MISSING_KEY_MESSAGE = "TypeSafe API キーが未設定です。backend/.env に TYPESAFE_API_KEY を設定してください。"
+
 
 class _AsyncClient(Protocol):
     """テストで差し替えられるようにするための最小インターフェース。"""

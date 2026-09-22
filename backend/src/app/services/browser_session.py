@@ -52,7 +52,7 @@ READ_SCRIPT = """
     );
     if (!label) continue;
     const id = 'e' + (out.length + 1);
-    el.setAttribute('data-jev-id', id);
+    el.setAttribute('data-jev-use-id', id);
     out.push({ id, role, name: label, kind, inputType, autocomplete });
   }
   return {
@@ -163,13 +163,18 @@ class BrowserSession:
         self._page = None
         self._browser = None
         self._playwright = None
-        if browser is not None:
-            await browser.close()
-        if playwright is not None:
-            await playwright.stop()
+        # 利用者がウィンドウを閉じた後などは close が失敗する。Playwright の停止は必ず行う。
+        try:
+            if browser is not None:
+                await browser.close()
+        except Exception:
+            logger.warning("ブラウザを閉じられませんでした", exc_info=True)
+        finally:
+            if playwright is not None:
+                await playwright.stop()
 
     def _locator(self, element_id: str) -> Any:
-        return self._page.locator(f'[data-jev-id="{element_id}"]')
+        return self._page.locator(f'[data-jev-use-id="{element_id}"]')
 
     async def _settle(self) -> None:
         try:

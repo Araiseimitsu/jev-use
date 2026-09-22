@@ -289,6 +289,35 @@ def test_closed_browser_is_explained_in_japanese() -> None:
     assert message == "ブラウザが閉じられたため停止しました。"
 
 
+def test_closing_the_stream_early_still_closes_the_browser(monkeypatch) -> None:
+    """画面の停止や切断で受信側が途中で抜けても、ブラウザを閉じてから終わる。"""
+    import threading
+
+    monkeypatch.setattr(settings, "approval_timeout_seconds", 30)
+    session = FakeSession(VIEW)
+    closed = threading.Event()
+    original_close = session.close
+
+    async def close() -> None:
+        await original_close()
+        closed.set()
+
+    session.close = close  # type: ignore[method-assign]
+    runner = _runner(session, [_decision("click:e2", risk=0.95)])
+
+    async def leave_at_confirm() -> None:
+        stream = runner.run_stream()
+        async for event in stream:
+            if event["event"] == "confirm_request":
+                break
+        await stream.aclose()
+
+    asyncio.run(leave_at_confirm())
+
+    assert closed.wait(5)
+    assert session.actions == []
+
+
 def test_same_action_three_times_stops() -> None:
     session = FakeSession(VIEW)
     click = _decision("click:e2")

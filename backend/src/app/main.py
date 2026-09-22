@@ -20,7 +20,7 @@ from app.core.config import settings
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="app", version="0.1.0")
+    app = FastAPI(title="jev-use", version="0.1.0")
     app.include_router(router, prefix="/api")
     # ルートのマウントは API ルートより後に定義する
     app.mount(

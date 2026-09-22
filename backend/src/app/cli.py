@@ -13,7 +13,8 @@ from typing import Any
 
 from app.core.config import settings
 from app.services.browser_agent import BrowserAgentRunner
-from app.services.jev.task_assessor import TaskAssessment, TaskAssessor
+from app.services.jev.asker import MISSING_KEY_MESSAGE
+from app.services.jev.task_assessor import MAX_STEPS_LIMIT, TaskAssessment, TaskAssessor
 from app.services.notifier import notify_browser_event
 from app.services.page_state import redact_secrets
 
@@ -100,12 +101,12 @@ async def main() -> None:
     parser.add_argument("--headless", action="store_true", help="ブラウザを表示しない")
     parser.add_argument("--yes", action="store_true", help="実行前の確認を省略する")
     args = parser.parse_args()
+    # API と同じ範囲に揃える
+    if args.max_steps is not None and not 1 <= args.max_steps <= MAX_STEPS_LIMIT:
+        parser.error(f"--max-steps は 1〜{MAX_STEPS_LIMIT} で指定してください。")
 
     if not settings.typesafe_api_key.strip():
-        print(
-            "エラー: TypeSafe API キーが未設定です。backend/.env に TYPESAFE_API_KEY を設定してください。",
-            file=sys.stderr,
-        )
+        print(f"エラー: {MISSING_KEY_MESSAGE}", file=sys.stderr)
         sys.exit(1)
 
     assessment = await TaskAssessor().assess(redact_secrets(args.task))

@@ -7,7 +7,7 @@ const clearBtn = document.querySelector("#clear-btn");
 const runBtn = document.querySelector("#run-btn");
 const stopBtn = document.querySelector("#stop-btn");
 const headlessToggle = document.querySelector("#headless-toggle");
-const confirm = document.querySelector("#confirm");
+const confirmNote = document.querySelector("#confirm");
 const formNote = document.querySelector("#form-note");
 const run = document.querySelector("#run");
 const pageLine = document.querySelector("#page-line");
@@ -27,7 +27,8 @@ const copyBtn = document.querySelector("#copy-btn");
 let runId = "";
 let acceptedTask = "";
 let abortController = null;
-let headless = true;
+// 設定を読めなかったときは画面の初期値に従う
+let headless = headlessToggle.checked;
 
 // 文言から状態を決め、ステータスドットの色・動きを切り替える
 const STATUS_STATE = {
@@ -65,19 +66,19 @@ form.querySelector(".presets").addEventListener("click", (event) => {
   const button = event.target.closest("button");
   if (!button?.dataset.preset) return;
   taskInput.value = button.dataset.preset;
-  clearBtn.hidden = !taskInput.value;
-  acceptedTask = "";
-  confirm.hidden = true;
-  runBtn.textContent = "実行する";
+  resetConfirmation();
   taskInput.focus();
 });
 
-taskInput.addEventListener("input", () => {
+// 指示が変わったら、前の指示への確認は使わない
+function resetConfirmation() {
   clearBtn.hidden = !taskInput.value;
   acceptedTask = "";
-  confirm.hidden = true;
+  confirmNote.hidden = true;
   runBtn.textContent = "実行する";
-});
+}
+
+taskInput.addEventListener("input", resetConfirmation);
 
 // Enter で送信（IME 変換中と Shift+Enter は除外）
 taskInput.addEventListener("keydown", (event) => {
@@ -88,10 +89,7 @@ taskInput.addEventListener("keydown", (event) => {
 
 clearBtn.addEventListener("click", () => {
   taskInput.value = "";
-  clearBtn.hidden = true;
-  acceptedTask = "";
-  confirm.hidden = true;
-  runBtn.textContent = "実行する";
+  resetConfirmation();
   taskInput.focus();
 });
 
@@ -107,8 +105,8 @@ form.addEventListener("submit", async (event) => {
     try {
       const assessment = await postJson("/browser/assess", { task });
       if (assessment.requires_confirmation) {
-        confirm.hidden = false;
-        confirm.textContent = (assessment.reasons || []).join(" ");
+        confirmNote.hidden = false;
+        confirmNote.textContent = (assessment.reasons || []).join(" ");
         acceptedTask = task;
         runBtn.textContent = "確認して実行";
         return;
@@ -126,10 +124,8 @@ form.addEventListener("submit", async (event) => {
 });
 
 async function startRun(task) {
-  acceptedTask = "";
-  confirm.hidden = true;
   taskInput.value = "";
-  clearBtn.hidden = true;
+  resetConfirmation();
   run.hidden = false;
   result.hidden = true;
   approval.hidden = true;
@@ -175,6 +171,7 @@ function onEvent(event) {
   } else if (event.event === "confirm_request") {
     approval.hidden = false;
     approvalText.textContent = data.reason || "この操作を実行しますか？";
+    setStatus("確認待ち");
   } else if (event.event === "complete") {
     showResult(data.result || "");
     setStatus("完了");
@@ -233,9 +230,12 @@ function finish(status) {
   abortController = null;
 }
 
+// 停止要求を出してから受信を切る。受信を切っても、サーバー側はブラウザを閉じてから終わる。
 stopBtn.addEventListener("click", async () => {
   if (runId) await postJson(`/browser/stop/${runId}`, {}).catch(() => {});
   abortController?.abort();
+  showResult("停止しました。");
+  setStatus("停止");
 });
 
 humanReadyBtn.addEventListener("click", async () => {
@@ -260,6 +260,7 @@ async function respondApproval(granted) {
   try {
     await postJson(`/browser/approve/${runId}`, { granted });
     approval.hidden = true;
+    setStatus("実行中");
   } catch (error) {
     formNote.textContent = error.message;
   } finally {

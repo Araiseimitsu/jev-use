@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Jev アプリアイコン: 青いグラデーションの角丸スクエアにポインタとクリックの輝き -->
+  <defs>
+    <linearGradient id="bg" x1="0.12" y1="0" x2="0.88" y2="1">
+      <stop offset="0" stop-color="#4aa8ff"/>
+      <stop offset="0.5" stop-color="#0a7ce8"/>
+      <stop offset="1" stop-color="#0059b3"/>
+    </linearGradient>
+    <radialGradient id="halo" cx="0.5" cy="0.4" r="0.65">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.20"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="512" height="512" rx="118" fill="url(#bg)"/>
+  <rect width="512" height="512" rx="118" fill="url(#halo)"/>
+  <circle cx="252" cy="252" r="176" fill="none" stroke="#ffffff" stroke-opacity="0.25" stroke-width="22"/>
+  <path d="M3 3 L10.07 19.97 L12.58 12.58 L19.97 12.58 Z" transform="translate(120 110) scale(12)" fill="#ffffff"/>
+  <path d="M352 124 L361 143 L380 152 L361 161 L352 180 L343 161 L324 152 L343 143 Z" fill="#ffffff" fill-opacity="0.92"/>
+</svg>

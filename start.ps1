@@ -2,7 +2,7 @@
 $ErrorActionPreference = "Stop"
 $projectRoot = $PSScriptRoot
 $backendPath = Join-Path $projectRoot "backend"
-$port = 8000
+$port = 8010
 
 Write-Host "=== 起動中 ===" -ForegroundColor Cyan
 

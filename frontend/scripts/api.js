@@ -74,7 +74,8 @@ export async function postSseStream(path, payload, onEvent, onError, signal) {
       if (done) break;
 
       buffer += decoder.decode(value, { stream: true });
-      const blocks = buffer.split("\n\n");
+      // sse-starlette は \r\n 区切りで送るため、\n 単独にも対応して分割する
+      const blocks = buffer.split(/\r?\n\r?\n/);
       // 最後の要素は未完了ブロックの可能性があるためバッファに残す
       buffer = blocks.pop() || "";
 

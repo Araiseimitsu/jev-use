@@ -3,8 +3,10 @@ import { getJson, postJson, postSseStream } from "./api.js";
 const systemStatus = document.querySelector("#system-status");
 const form = document.querySelector("#task-form");
 const taskInput = document.querySelector("#task-input");
+const clearBtn = document.querySelector("#clear-btn");
 const runBtn = document.querySelector("#run-btn");
 const stopBtn = document.querySelector("#stop-btn");
+const headlessToggle = document.querySelector("#headless-toggle");
 const confirm = document.querySelector("#confirm");
 const formNote = document.querySelector("#form-note");
 const run = document.querySelector("#run");
@@ -25,20 +27,45 @@ const copyBtn = document.querySelector("#copy-btn");
 let runId = "";
 let acceptedTask = "";
 let abortController = null;
+let headless = true;
+
+// 文言から状態を決め、ステータスドットの色・動きを切り替える
+const STATUS_STATE = {
+  "準備完了": "ready",
+  "API キーが未設定です": "warn",
+  "接続できません": "error",
+  "実行中": "running",
+  "確認待ち": "waiting",
+  "入力待ち": "waiting",
+  "完了": "done",
+  "停止": "error",
+};
+
+function setStatus(text) {
+  systemStatus.dataset.state = STATUS_STATE[text] || "ready";
+  systemStatus.textContent = text;
+}
 
 async function init() {
   try {
     const config = await getJson("/config");
-    systemStatus.textContent = config.typesafe_enabled ? "準備完了" : "API キーが未設定です";
+    headless = Boolean(config.headless);
+    headlessToggle.checked = headless;
+    setStatus(config.typesafe_enabled ? "準備完了" : "API キーが未設定です");
   } catch {
-    systemStatus.textContent = "接続できません";
+    setStatus("接続できません");
   }
 }
+
+headlessToggle.addEventListener("change", () => {
+  headless = headlessToggle.checked;
+});
 
 form.querySelector(".presets").addEventListener("click", (event) => {
   const button = event.target.closest("button");
   if (!button?.dataset.preset) return;
   taskInput.value = button.dataset.preset;
+  clearBtn.hidden = !taskInput.value;
   acceptedTask = "";
   confirm.hidden = true;
   runBtn.textContent = "実行する";
@@ -46,9 +73,26 @@ form.querySelector(".presets").addEventListener("click", (event) => {
 });
 
 taskInput.addEventListener("input", () => {
+  clearBtn.hidden = !taskInput.value;
   acceptedTask = "";
   confirm.hidden = true;
   runBtn.textContent = "実行する";
+});
+
+// Enter で送信（IME 変換中と Shift+Enter は除外）
+taskInput.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" || event.shiftKey || event.isComposing) return;
+  event.preventDefault();
+  form.requestSubmit();
+});
+
+clearBtn.addEventListener("click", () => {
+  taskInput.value = "";
+  clearBtn.hidden = true;
+  acceptedTask = "";
+  confirm.hidden = true;
+  runBtn.textContent = "実行する";
+  taskInput.focus();
 });
 
 form.addEventListener("submit", async (event) => {
@@ -84,6 +128,8 @@ form.addEventListener("submit", async (event) => {
 async function startRun(task) {
   acceptedTask = "";
   confirm.hidden = true;
+  taskInput.value = "";
+  clearBtn.hidden = true;
   run.hidden = false;
   result.hidden = true;
   approval.hidden = true;
@@ -93,12 +139,12 @@ async function startRun(task) {
   runBtn.disabled = true;
   runBtn.textContent = "実行中";
   stopBtn.hidden = false;
-  systemStatus.textContent = "実行中";
+  setStatus("実行中");
 
   abortController = new AbortController();
   await postSseStream(
     "/browser/run",
-    { task },
+    { task, headless },
     onEvent,
     (error) => {
       formNote.textContent = error.message;
@@ -131,12 +177,12 @@ function onEvent(event) {
     approvalText.textContent = data.reason || "この操作を実行しますか？";
   } else if (event.event === "complete") {
     showResult(data.result || "");
-    systemStatus.textContent = "完了";
+    setStatus("完了");
   } else if (event.event === "error") {
     const message = data.message || "実行できませんでした。";
     showResult(message);
     formNote.textContent = message;
-    systemStatus.textContent = "停止";
+    setStatus("停止");
   }
 }
 
@@ -170,7 +216,7 @@ function showPause(messageEl, data, buttonLabel, waitingStatus) {
   messageEl.textContent = data.message || "";
   humanReadyBtn.hidden = !active;
   humanReadyBtn.textContent = buttonLabel;
-  systemStatus.textContent = active ? waitingStatus : "実行中";
+  setStatus(active ? waitingStatus : "実行中");
 }
 
 function finish(status) {
@@ -183,7 +229,7 @@ function finish(status) {
   humanReadyBtn.hidden = true;
   humanReadyBtn.textContent = "確認できた";
   if (result.hidden && !steps.childElementCount) run.hidden = true;
-  if (systemStatus.textContent === "実行中") systemStatus.textContent = status;
+  if (systemStatus.textContent === "実行中") setStatus(status);
   abortController = null;
 }
 
@@ -227,7 +273,7 @@ copyBtn.addEventListener("click", async () => {
     await navigator.clipboard.writeText(resultText.textContent || "");
     copyBtn.textContent = "コピーしました";
     setTimeout(() => {
-      copyBtn.textContent = "結果をコピー";
+      copyBtn.textContent = "コピー";
     }, 1600);
   } catch {
     formNote.textContent = "コピーできませんでした。";

@@ -24,6 +24,9 @@ ACTIVE_RUNS: dict[str, BrowserAgentRunner] = {}
 class RunRequest(BaseModel):
     task: str = Field(..., description="実行する指示")
     max_steps: int | None = Field(default=None, ge=1, le=MAX_STEPS_LIMIT, description="最大ステップ数")
+    headless: bool | None = Field(
+        default=None, description="true で表示しない / false で表示する。未指定なら設定値"
+    )
 
 
 class AssessRequest(BaseModel):
@@ -104,6 +107,7 @@ async def run_browser_task(request: RunRequest) -> EventSourceResponse:
     runner = BrowserAgentRunner(
         task=task,
         max_steps=request.max_steps,
+        headless=request.headless,
     )
     ACTIVE_RUNS[run_id] = runner
     visible_task = redact_secrets(task)

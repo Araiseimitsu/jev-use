@@ -4,28 +4,40 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Jev</title>
+    <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
+    <link rel="alternate icon" href="/icons/icon-192.png" type="image/png" sizes="192x192" />
+    <link rel="apple-touch-icon" href="/icons/icon-180.png" />
+    <meta name="theme-color" content="#0a7ce8" />
     <link rel="stylesheet" href="/styles/base.css" />
   </head>
   <body>
     <header class="top">
       <a class="brand" href="/">Jev</a>
-      <p id="system-status">接続確認中</p>
+      <div class="header-right">
+        <label class="toggle" title="ブラウザを表示せずに動かす">
+          <input type="checkbox" id="headless-toggle" checked />
+          <span>ヘッドレス</span>
+        </label>
+        <p id="system-status" data-state="loading">接続確認中</p>
+      </div>
     </header>
 
     <main>
       <h1>ブラウザに調べものを任せる</h1>
       <p class="lede">
-        開いたページのボタンと入力欄を読み、次に押す場所を選んで実行します。別のウィンドウで Chromium が開きます。ログインなど自動では入れられない項目は、そのウィンドウで入力して「続行」を押します。
+        開いたページのボタンと入力欄を読み、次に押す場所を選んで実行します。Enter で送信（Shift+Enter で改行）。
       </p>
 
       <form id="task-form">
-        <label for="task-input">やりたいこと</label>
-        <textarea
-          id="task-input"
-          rows="3"
-          placeholder="例: Googleで東京の明日の天気を調べて、最高気温を教えて"
-          autofocus
-        ></textarea>
+        <div class="input-wrap">
+          <textarea
+            id="task-input"
+            rows="2"
+            placeholder="例: Googleで東京の明日の天気を調べて、最高気温を教えて"
+            autofocus
+          ></textarea>
+          <button type="button" id="clear-btn" class="clear-btn" title="入力をクリア" aria-label="入力をクリア" hidden>×</button>
+        </div>
         <div class="presets">
           <button type="button" data-preset="Googleで東京の明日の天気を調べて、最高気温を教えて">
             明日の天気
@@ -48,9 +60,8 @@
       <section id="run" hidden>
         <p id="page-line" class="page-line"></p>
         <article id="result" hidden>
-          <h2>結果</h2>
           <p id="result-text"></p>
-          <button type="button" id="copy-btn" class="quiet">結果をコピー</button>
+          <button type="button" id="copy-btn" class="quiet">コピー</button>
         </article>
         <p id="human-check" class="confirm" hidden></p>
         <p id="user-input" class="confirm" hidden></p>

@@ -14,7 +14,7 @@ from typing import Any
 from app.core.config import settings
 from app.services.browser_agent import BrowserAgentRunner
 from app.services.jev.task_assessor import TaskAssessment, TaskAssessor
-from app.services.notifier import TaskNotifier
+from app.services.notifier import notify_browser_event
 from app.services.page_state import redact_secrets
 
 
@@ -124,21 +124,13 @@ async def main() -> None:
         headless=True if args.headless else None,
     )
     visible_task = redact_secrets(args.task)
-    final_event: dict[str, Any] | None = None
+    failed = False
     async for event in runner.run_stream():
         print_event(event, runner)
-        if event.get("event") in ("complete", "error"):
-            final_event = event
-
-    if final_event and final_event.get("event") == "complete":
-        TaskNotifier().notify(task=visible_task, result=str(final_event["data"].get("result", "")), mode=runner.mode)
-    elif final_event and final_event.get("event") == "error":
-        TaskNotifier().notify(
-            task=visible_task,
-            result=str(final_event["data"].get("message", "")),
-            mode=runner.mode,
-            success=False,
-        )
+        notify_browser_event(event, visible_task, runner.mode)
+        if event.get("event") == "error":
+            failed = True
+    if failed:
         sys.exit(1)
 
 

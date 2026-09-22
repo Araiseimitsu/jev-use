@@ -200,10 +200,25 @@ button:focus-visible {
   font-size: 13px;
 }
 
-.approval,
-#result {
+.approval {
   margin-top: 20px;
   padding-top: 8px;
+}
+
+#result {
+  margin-top: 16px;
+  padding: 16px 18px;
+  border-radius: 16px;
+  background: var(--card);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.08);
+}
+
+#result h2 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--muted);
 }
 
 #result-text {

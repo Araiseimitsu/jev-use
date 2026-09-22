@@ -130,13 +130,20 @@ function onEvent(event) {
     approval.hidden = false;
     approvalText.textContent = data.reason || "この操作を実行しますか？";
   } else if (event.event === "complete") {
-    result.hidden = false;
-    resultText.textContent = data.result || "";
+    showResult(data.result || "");
     systemStatus.textContent = "完了";
   } else if (event.event === "error") {
-    formNote.textContent = data.message || "実行できませんでした。";
+    const message = data.message || "実行できませんでした。";
+    showResult(message);
+    formNote.textContent = message;
     systemStatus.textContent = "停止";
   }
+}
+
+function showResult(text) {
+  result.hidden = false;
+  resultText.textContent = text;
+  result.scrollIntoView({ block: "nearest" });
 }
 
 function appendStep(data) {

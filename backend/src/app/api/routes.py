@@ -12,7 +12,7 @@ from sse_starlette.sse import EventSourceResponse
 from app.core.config import settings
 from app.services.browser_agent import BrowserAgentRunner
 from app.services.jev.task_assessor import MAX_STEPS_LIMIT, TaskAssessor
-from app.services.notifier import TaskNotifier
+from app.services.notifier import notify_browser_event
 from app.services.page_state import redact_secrets
 
 router = APIRouter()
@@ -61,15 +61,7 @@ def _to_sse(event: dict[str, Any]) -> dict[str, str]:
 
 
 def _notify_if_finished(event: dict[str, Any], task: str, mode: str) -> None:
-    kind = event["event"]
-    if kind == "complete":
-        TaskNotifier().notify(
-            task=task, result=str(event["data"].get("result", "")), mode=mode, success=True
-        )
-    elif kind == "error":
-        TaskNotifier().notify(
-            task=task, result=str(event["data"].get("message", "")), mode=mode, success=False
-        )
+    notify_browser_event(event, task, mode)
 
 
 def _active_runner(run_id: str) -> BrowserAgentRunner:

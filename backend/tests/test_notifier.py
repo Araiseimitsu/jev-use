@@ -6,7 +6,7 @@ from typing import Any
 import pytest
 
 from app.core.config import settings
-from app.services.notifier import MESSAGE_LIMIT, TaskNotifier, summarize
+from app.services.notifier import MESSAGE_LIMIT, TaskNotifier, notify_browser_event, summarize
 
 
 class _Recorder:
@@ -90,7 +90,7 @@ def test_notify_never_raises(monkeypatch) -> None:
 
 
 def test_route_notifies_on_complete(monkeypatch) -> None:
-    """完了イベントで通知が 1 回だけ呼ばれること。"""
+    """完了とエラーで通知し、開始では通知しない。"""
     from app.api import routes
 
     recorded: list[dict[str, Any]] = []
@@ -99,7 +99,10 @@ def test_route_notifies_on_complete(monkeypatch) -> None:
         def notify(self, **kwargs: Any) -> None:
             recorded.append(kwargs)
 
-    monkeypatch.setattr(routes, "TaskNotifier", lambda: _FakeNotifier())
+        def notify_waiting(self, **kwargs: Any) -> None:
+            recorded.append({"waiting": True, **kwargs})
+
+    monkeypatch.setattr("app.services.notifier.TaskNotifier", lambda: _FakeNotifier())
 
     routes._notify_if_finished(
         {"event": "complete", "data": {"result": "完了しました"}}, "テスト", "browser"
@@ -114,6 +117,40 @@ def test_route_notifies_on_complete(monkeypatch) -> None:
     assert recorded[0]["mode"] == "browser"
     assert recorded[1]["success"] is False
     assert recorded[1]["mode"] == "browser"
+
+
+def test_waiting_notifies_once_until_the_person_continues(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "enable_notifications", True)
+    monkeypatch.setattr("app.services.notifier.sys.platform", "win32")
+    recorder = _Recorder()
+    monkeypatch.setattr("app.services.notifier._show_windows_toast", recorder)
+
+    notify_browser_event(
+        {"event": "user_input", "data": {"active": True, "message": "ログインしてください"}},
+        "予定を教えて",
+        "browser",
+    )
+    notify_browser_event(
+        {"event": "user_input", "data": {"active": False, "message": ""}},
+        "予定を教えて",
+        "browser",
+    )
+    notify_browser_event(
+        {"event": "human_check", "data": {"active": True, "message": "確認してください"}},
+        "予定を教えて",
+        "browser",
+    )
+    notify_browser_event(
+        {"event": "confirm_request", "data": {"reason": "購入ボタンを押します"}},
+        "予定を教えて",
+        "browser",
+    )
+
+    assert recorder.sent == [
+        ("入力が必要です - ブラウザ操作", "ログインしてください"),
+        ("入力が必要です - ブラウザ操作", "確認してください"),
+        ("入力が必要です - ブラウザ操作", "購入ボタンを押します"),
+    ]
 
 
 def test_notifications_default_enabled(monkeypatch) -> None:

@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Jev</title>
+    <link rel="stylesheet" href="/styles/base.css" />
+  </head>
+  <body>
+    <header class="top">
+      <a class="brand" href="/">Jev</a>
+      <p id="system-status">接続確認中</p>
+    </header>
+
+    <main>
+      <h1>ブラウザに調べものを任せる</h1>
+      <p class="lede">
+        開いたページのボタンと入力欄を読み、次に押す場所を選んで実行します。別のウィンドウで Chromium が開きます。
+      </p>
+
+      <form id="task-form">
+        <label for="task-input">やりたいこと</label>
+        <textarea
+          id="task-input"
+          rows="3"
+          placeholder="例: Googleで東京の明日の天気を調べて、最高気温を教えて"
+          autofocus
+        ></textarea>
+        <div class="credentials">
+          <div>
+            <label for="username-input">ユーザー名</label>
+            <input
+              id="username-input"
+              type="text"
+              autocomplete="username"
+              placeholder="ログインが要るときだけ"
+            />
+          </div>
+          <div>
+            <label for="password-input">パスワード</label>
+            <input
+              id="password-input"
+              type="password"
+              autocomplete="current-password"
+              placeholder="ログインが要るときだけ"
+            />
+          </div>
+        </div>
+        <div class="presets">
+          <button type="button" data-preset="Googleで東京の明日の天気を調べて、最高気温を教えて">
+            明日の天気
+          </button>
+          <button type="button" data-preset="Wikipediaで富士山を開き、標高を教えて">
+            富士山の標高
+          </button>
+          <button type="button" data-preset="https://example.com を開いて、ページに何が書いてあるか教えて">
+            ページの内容
+          </button>
+        </div>
+        <p id="confirm" class="confirm" hidden></p>
+        <div class="actions">
+          <button type="submit" id="run-btn">実行する</button>
+          <button type="button" id="stop-btn" class="quiet" hidden>停止</button>
+        </div>
+        <p id="form-note" class="note"></p>
+      </form>
+
+      <section id="run" hidden>
+        <p id="page-line" class="page-line"></p>
+        <p id="human-check" class="confirm" hidden></p>
+        <button type="button" id="human-ready-btn" class="quiet" hidden>確認できた</button>
+        <img id="preview" alt="開いているページ" hidden />
+        <ol id="steps"></ol>
+        <div id="approval" class="approval" hidden>
+          <p id="approval-text"></p>
+          <div class="actions">
+            <button type="button" id="approve-btn">実行する</button>
+            <button type="button" id="deny-btn" class="quiet">やめる</button>
+          </div>
+        </div>
+        <article id="result" hidden>
+          <h2>結果</h2>
+          <p id="result-text"></p>
+          <button type="button" id="copy-btn" class="quiet">結果をコピー</button>
+        </article>
+      </section>
+    </main>
+
+    <script type="module" src="/scripts/index.js"></script>
+  </body>
+</html>

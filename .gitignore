@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+
+# 環境変数（秘密情報）
+.env
+.env.*
+!.env.example
+
+# ブラウザ操作で人が確認を済ませたあとの状態
+backend/.browser-profile/
+
+# OS
+.DS_Store
+Thumbs.db

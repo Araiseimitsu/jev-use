@@ -101,7 +101,7 @@ async function init() {
     const config = await getJson("/config");
     headless = Boolean(config.headless);
     headlessToggle.checked = headless;
-    setStatus(config.typesafe_enabled ? "準備完了" : "API キーが未設定です");
+    setStatus(config.typesafe_enabled && config.text_enabled ? "準備完了" : "API キーが未設定です");
   } catch {
     setStatus("接続できません");
   }
@@ -249,7 +249,9 @@ function appendStep(data) {
     : action.description || action.id || "操作";
   const meta = document.createElement("span");
   const bits = [];
-  if (typeof jev.confidence === "number") bits.push(`確信度 ${Math.round(jev.confidence * 100)}%`);
+  // 次の操作は Gemini が選び、選んだ理由を返す。Jev は危険度だけを判定する。
+  if (jev.reason) bits.push(jev.reason);
+  if (typeof jev.risk_probability === "number") bits.push(`危険度 ${Math.round(jev.risk_probability * 100)}%`);
   if (typeof jev.latency_ms === "number") bits.push(`${jev.latency_ms}ms`);
   if (data.error) bits.push(data.error);
   meta.textContent = bits.join("  ");

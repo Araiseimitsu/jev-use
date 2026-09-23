@@ -7,10 +7,13 @@ import re
 from dataclasses import asdict, dataclass
 from urllib.parse import urlparse
 
-# Jev の Choice に載せる要素の上限。制御操作（スクロール等）は別に足す。
-MAX_CANDIDATES = 12
+# 次の操作を選ぶ Gemini に渡す要素の上限。制御操作（戻る等）は別に足す。
+# ナビやボタンが多いページでも、一覧の行や送信ボタンが漏れにくい数にする。
+MAX_CANDIDATES = 40
 # Jev に渡す本文の上限（state を小さく保つ）
 EXCERPT_FOR_JEV = 800
+# 本文を切り詰めるとき先頭に残す文字数。残りは末尾から取る（チャットの最新の回答は末尾にある）。
+EXCERPT_HEAD_FOR_JEV = 300
 
 _URL_IN_TASK = re.compile(r"https?://[^\s<>\"']+")
 _DEFAULT_START = "https://www.google.com"
@@ -25,6 +28,12 @@ _PASS_LINE = re.compile(
 _USERNAME_HINTS = ("ユーザー", "ユーザ", "username", "user name", "login", "ログイン", "アカウント", "email", "e-mail", "メール")
 _PASSWORD_HINTS = ("password", "passwd", "パスワード")
 _SECRET_MASK = "［パスワード］"
+# 入力欄の案内に書かれた送信キー（「Ctrl+Enter で送信」「Cmd+Enter to send」など）
+_SEND_WORD = r"(?:で|to|for)?\s*(?:送信|投稿|send|post|submit)"
+_CTRL_ENTER_SEND = re.compile(r"(?:ctrl|control|cmd|command|⌘)\s*\+\s*enter\s*" + _SEND_WORD, re.IGNORECASE)
+_SHIFT_ENTER_SEND = re.compile(r"shift\s*\+\s*enter\s*" + _SEND_WORD, re.IGNORECASE)
+# 修飾キーの付かない Enter が改行だと書かれているか
+_ENTER_NEWLINE = re.compile(r"(?<![+\w])\s*enter\s*(?:で|to|for)?\s*(?:改行|new\s*line|line\s*break)", re.IGNORECASE)
 _MIN_SECRET_LENGTH = 4
 
 # サイトが人の操作を求めて出している確認画面。本文の偶然の一致を避けるため、文言は確認画面に特有なものだけにする。
@@ -60,6 +69,10 @@ class Element:
     disabled: bool = False
     filled: bool = False
     form_id: str = ""
+    # 検索欄か（type=search、role=search の中など）。入力後に Enter で検索する。
+    search: bool = False
+    # 入力欄に対応する送信ボタンの id。ページの構造から決め、無ければ空。
+    submit_id: str = ""
 
     def to_dict(self) -> dict[str, str | bool]:
         return asdict(self)
@@ -93,7 +106,6 @@ class ActionOption:
 
 
 CONTROL_ACTIONS: tuple[ActionOption, ...] = (
-    ActionOption("scroll_down", "ページを下にスクロールする"),
     ActionOption("back", "前のページに戻る"),
     ActionOption("wait", "何もせず、読み込みを待つ"),
     ActionOption("done", "指示は達成できたので操作を終える"),
@@ -139,7 +151,14 @@ def elements_from_raw(raw: object) -> tuple[Element, ...]:
         disabled = item.get("disabled") is True
         filled = item.get("filled") is True
         form_id = str(item.get("formId") or "")
-        elements.append(Element(element_id, role, name, kind, input_type, autocomplete, disabled, filled, form_id))
+        search = item.get("search") is True
+        submit_id = str(item.get("submitId") or "")
+        elements.append(
+            Element(
+                element_id, role, name, kind, input_type, autocomplete, disabled, filled, form_id,
+                search, submit_id,
+            )
+        )
     return tuple(elements)
 
 
@@ -157,9 +176,15 @@ def page_view_from_raw(raw: object) -> PageView:
 
 
 def rank_elements(
-    elements: tuple[Element, ...] | list[Element], task: str, limit: int = MAX_CANDIDATES
+    elements: tuple[Element, ...] | list[Element],
+    task: str,
+    limit: int = MAX_CANDIDATES,
+    prefer: frozenset[str] = frozenset(),
 ) -> tuple[Element, ...]:
-    """指示に関係しそうな要素を前に出す。同点ならページ上の順を保つ。"""
+    """指示に関係しそうな要素を前に出す。同点ならページ上の順を保つ。
+
+    prefer は入力済みの欄の送信ボタンなど、次に押す見込みが高い要素の id。
+    """
     folded = task.casefold()
     scored: list[tuple[int, int, Element]] = []
     for index, element in enumerate(elements):
@@ -167,6 +192,8 @@ def rank_elements(
             continue
         name = element.name.casefold()
         score = 3 if element.kind == "type" else 0
+        if element.id in prefer:
+            score += 4
         if name and name in folded:
             score += 5
         elif any(part and part in folded for part in name.split()):
@@ -195,9 +222,9 @@ def _leave_to_user(element: Element, defer_login: bool) -> bool:
 
 
 def action_catalog(
-    elements: tuple[Element, ...] | list[Element], *, defer_login: bool = False
+    elements: tuple[Element, ...] | list[Element], *, defer_login: bool = False, can_go_back: bool = True
 ) -> tuple[ActionOption, ...]:
-    """要素と、いつでも選べる制御操作を候補にする。"""
+    """要素と制御操作を候補にする。戻り先が無いページでは「戻る」を出さない（about:blank に出てしまう）。"""
     options: list[ActionOption] = []
     for element in elements:
         if element.disabled:
@@ -205,24 +232,74 @@ def action_catalog(
         if element.kind == "type":
             if _leave_to_user(element, defer_login):
                 continue
-            description = f"「{element.name}」に、依頼に合う文字列を入力する"
+            description = f"「{element.name}」（{field_kind(element)}）に、依頼に合う文字列を入力する"
             options.append(ActionOption(f"type:{element.id}", description))
         else:
             description = f"「{element.name}」（{element.role}）をクリックする"
             options.append(ActionOption(f"click:{element.id}", description))
-    options.extend(CONTROL_ACTIONS)
+    options.extend(option for option in CONTROL_ACTIONS if can_go_back or option.id != "back")
     return tuple(options)
 
 
-def submits_on_enter(element: Element) -> bool:
-    """検索欄なら入力後に Enter を押す。"""
+def is_search_field(element: Element) -> bool:
+    """検索欄か。ページの構造を優先し、名前の「検索」「search」でも補う。"""
+    if element.kind != "type":
+        return False
     name = element.name.casefold()
-    return element.kind == "type" and ("検索" in element.name or "search" in name)
+    return element.search or element.input_type == "search" or "検索" in name or "search" in name
+
+
+def submits_on_enter(element: Element) -> bool:
+    """検索欄なら入力後に Enter を押す。
+
+    それ以外の欄では押さない。チャット欄の Enter は送信になり、送信ボタンの承認を経ずに送ってしまうため。
+    """
+    return is_search_field(element)
+
+
+def send_key(element: Element) -> str | None:
+    """送信ボタンの無い欄で、送信に使うキー。欄の名前や案内（placeholder）に書かれたものに従う。
+
+    「Ctrl+Enter で送信 / Enter で改行」のような欄で Enter を押すと、送らずに改行してしまうため。
+    Enter が改行だと書かれ、送信のキーが書かれていなければ None（キーでは送らない）。
+    """
+    name = element.name
+    if _CTRL_ENTER_SEND.search(name):
+        return "ControlOrMeta+Enter"
+    if _SHIFT_ENTER_SEND.search(name):
+        return "Shift+Enter"
+    if _ENTER_NEWLINE.search(name):
+        return None
+    return "Enter"
+
+
+def field_kind(element: Element) -> str:
+    """Jev が欄を見分けるための種類。type と autocomplete から決める。"""
+    auto = element.autocomplete.casefold()
+    if is_search_field(element):
+        return "検索欄"
+    if element.input_type == "email" or "email" in auto:
+        return "メールアドレス欄"
+    if element.input_type == "tel" or auto.startswith("tel"):
+        return "電話番号欄"
+    if element.input_type == "url" or auto == "url":
+        return "URL 欄"
+    if element.input_type == "number":
+        return "数値欄"
+    if auto in {"name", "given-name", "family-name", "nickname"}:
+        return "名前欄"
+    if element.role in {"textarea", "textbox"} and not element.input_type:
+        return "文章の入力欄"
+    return "1 行の入力欄"
 
 
 def jev_excerpt(view: PageView) -> str:
-    """Jev に渡す本文。長すぎると判断が遅くなるため切る。"""
-    return view.excerpt[:EXCERPT_FOR_JEV]
+    """Jev に渡す本文。長すぎると判断が遅くなるため、先頭と末尾を残して切る。"""
+    text = view.excerpt
+    if len(text) <= EXCERPT_FOR_JEV:
+        return text
+    tail = EXCERPT_FOR_JEV - EXCERPT_HEAD_FOR_JEV - len(" … ")
+    return f"{text[:EXCERPT_HEAD_FOR_JEV]} … {text[-tail:]}"
 
 
 def field_purpose(element: Element) -> str:

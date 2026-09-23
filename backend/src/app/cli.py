@@ -14,6 +14,7 @@ from typing import Any
 from app.core.config import settings
 from app.services.browser_agent import BrowserAgentRunner
 from app.services.jev.asker import MISSING_KEY_MESSAGE
+from app.services.planner import MISSING_GEMINI_MESSAGE
 from app.services.jev.task_assessor import MAX_STEPS_LIMIT, TaskAssessment, TaskAssessor
 from app.services.notifier import notify_browser_event
 from app.services.page_state import redact_secrets
@@ -60,12 +61,10 @@ def print_event(event: dict[str, Any], runner: BrowserAgentRunner) -> None:
         if data.get("error"):
             print(f"  失敗: {data['error']}")
         jev = data.get("jev") or {}
+        if jev.get("reason"):
+            print(f"  理由: {jev['reason']}")
         if jev:
-            print(
-                f"  確信度 {jev.get('confidence', 0):.0%}"
-                f" / 危険度 {jev.get('risk_probability', 0):.0%}"
-                f" / {jev.get('latency_ms', 0)}ms"
-            )
+            print(f"  危険度 {jev.get('risk_probability', 0):.0%} / {jev.get('latency_ms', 0)}ms")
     elif ev_type == "human_check" and data.get("active"):
         print(f"\n[確認] {data.get('message')}")
     elif ev_type == "user_input" and data.get("active"):
@@ -107,6 +106,9 @@ async def main() -> None:
 
     if not settings.typesafe_api_key.strip():
         print(f"エラー: {MISSING_KEY_MESSAGE}", file=sys.stderr)
+        sys.exit(1)
+    if not settings.gemini_api_key.strip():
+        print(f"エラー: {MISSING_GEMINI_MESSAGE}", file=sys.stderr)
         sys.exit(1)
 
     assessment = await TaskAssessor().assess(redact_secrets(args.task))

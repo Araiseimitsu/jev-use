@@ -12,6 +12,7 @@ from sse_starlette.sse import EventSourceResponse
 from app.core.config import settings
 from app.services.browser_agent import BrowserAgentRunner
 from app.services.jev.asker import MISSING_KEY_MESSAGE
+from app.services.planner import MISSING_GEMINI_MESSAGE
 from app.services.jev.task_assessor import MAX_STEPS_LIMIT, TaskAssessor
 from app.services.notifier import notify_browser_event
 from app.services.page_state import redact_secrets
@@ -61,6 +62,12 @@ def _require_typesafe() -> None:
         raise HTTPException(status_code=400, detail=MISSING_KEY_MESSAGE)
 
 
+def _require_gemini() -> None:
+    """次の操作は Gemini が選ぶため、キーが無ければ始めない。"""
+    if not settings.gemini_api_key.strip():
+        raise HTTPException(status_code=400, detail=MISSING_GEMINI_MESSAGE)
+
+
 def _to_sse(event: dict[str, Any]) -> dict[str, str]:
     return {"event": event["event"], "data": json.dumps(event["data"], ensure_ascii=False)}
 
@@ -97,9 +104,10 @@ async def assess_browser_task(request: AssessRequest) -> dict[str, object]:
 
 @router.post("/browser/run")
 async def run_browser_task(request: RunRequest) -> EventSourceResponse:
-    """ページの要素を読んで Jev が操作を選び、Playwright が実行する。"""
+    """ページの要素を読んで Gemini が操作を選び、Jev が危険度を判定し、Playwright が実行する。"""
     task = _require_task(request.task)
     _require_typesafe()
+    _require_gemini()
 
     run_id = uuid.uuid4().hex
     runner = BrowserAgentRunner(

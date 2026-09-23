@@ -1,6 +1,6 @@
 """Playwright でページを読み、選ばれた要素を操作する。
 
-判断には使わない。スクショは人が見るプレビューだけで、モデルには送らない。
+操作の判断には使わない。回答を文字情報から確認できない場合は画像も撮影する。
 """
 
 import base64
@@ -62,7 +62,24 @@ READ_SCRIPT = """
   return {
     url: location.href,
     title: document.title || '',
-    excerpt: (document.body && document.body.innerText || '').replace(/\\s+/g, ' ').trim().slice(0, 1500),
+    excerpt: (() => {
+      // ナビゲーションが長いページでも、主要領域の本文を先に判断へ渡す。
+      const main = document.querySelector('main, [role="main"], article');
+      const scope = main || document.body;
+      const text = (scope && scope.innerText || '').replace(/\\s+/g, ' ').trim();
+      const labels = [];
+      for (const el of (scope || document).querySelectorAll('[aria-label], [title], img[alt], svg text')) {
+        if (labels.length >= 80) break;
+        const rect = el.getBoundingClientRect();
+        const style = getComputedStyle(el);
+        if (rect.width < 2 || rect.height < 2 || style.display === 'none' || style.visibility === 'hidden') continue;
+        const label = (el.getAttribute('aria-label') || el.getAttribute('title')
+          || el.getAttribute('alt') || el.textContent || '').replace(/\\s+/g, ' ').trim();
+        if (label && !text.includes(label) && !labels.includes(label)) labels.push(label);
+      }
+      const labelledText = labels.join(' ').slice(0, 600);
+      return [labelledText, text.slice(0, 1500 - labelledText.length - 1)].filter(Boolean).join(' ');
+    })(),
     feedback: Array.from(document.querySelectorAll(
       '[role="status"], [role="alert"], [aria-live="polite"], [aria-live="assertive"]'
     )).filter(el => {
@@ -157,9 +174,20 @@ class BrowserSession:
             if actual != text:
                 raise RuntimeError("入力欄に指定した文字列が反映されませんでした。")
 
-    async def scroll(self) -> None:
+    async def scroll(self) -> bool:
+        # wheel はポインター直下へ届くため、ページ中央のスクロール領域を狙う。
+        position_script = """() => {
+          const el = document.elementFromPoint(innerWidth / 2, innerHeight / 2);
+          const positions = [];
+          for (let node = el; node; node = node.parentElement) positions.push(node.scrollTop);
+          return {x: innerWidth / 2, y: innerHeight / 2, page: scrollY, positions};
+        }"""
+        before = await self._page.evaluate(position_script)
+        await self._page.mouse.move(before["x"], before["y"])
         await self._page.mouse.wheel(0, 900)
         await self._settle()
+        after = await self._page.evaluate(position_script)
+        return before != after
 
     async def back(self) -> None:
         await self._page.go_back(wait_until="domcontentloaded", timeout=8000)
@@ -174,6 +202,15 @@ class BrowserSession:
             data = await self._page.screenshot(type="jpeg", quality=60)
         except Exception:
             logger.warning("プレビューの取得に失敗しました", exc_info=True)
+            return None
+        return base64.standard_b64encode(data).decode("ascii")
+
+    async def vision_jpeg(self) -> str | None:
+        """回答確認用に、画面上の小さな文字も読める品質で撮影する。"""
+        try:
+            data = await self._page.screenshot(type="jpeg", quality=85)
+        except Exception:
+            logger.warning("回答確認用の画像を取得できませんでした", exc_info=True)
             return None
         return base64.standard_b64encode(data).decode("ascii")
 

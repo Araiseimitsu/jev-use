@@ -39,3 +39,28 @@ def test_fill_checks_the_value_after_the_page_updates() -> None:
                 await browser.close()
 
     asyncio.run(exercise())
+
+
+def test_read_includes_visible_accessible_labels() -> None:
+    async def exercise() -> None:
+        async with async_playwright() as playwright:
+            browser = await playwright.chromium.launch(headless=True)
+            try:
+                page = await browser.new_page(viewport={"width": 1280, "height": 800})
+                await page.set_content(
+                    '<main><div aria-label="会議 14時から">予定</div>'
+                    '<img alt="案内図" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==" '
+                    'style="width:20px;height:20px"></main>'
+                )
+                session = BrowserSession(headless=True)
+                session._page = page
+
+                view = await session.read()
+
+                assert "会議 14時から" in view.excerpt
+                assert "案内図" in view.excerpt
+                assert await session.scroll() is False
+            finally:
+                await browser.close()
+
+    asyncio.run(exercise())

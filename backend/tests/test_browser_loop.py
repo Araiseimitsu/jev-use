@@ -57,6 +57,9 @@ class FakeSession:
         self.previews += 1
         return None
 
+    async def vision_jpeg(self) -> None:
+        return None
+
     async def close(self) -> None:
         self.closed = True
 
@@ -77,6 +80,8 @@ class ScriptedDecider:
 
 
 class FakeWriter:
+    enabled = True
+
     def __init__(self, phrase: str = "東京 天気", summary: str = "晴れ、25度") -> None:
         self.phrase_text = phrase
         self.summary_text = summary
@@ -88,6 +93,9 @@ class FakeWriter:
 
     async def summary(self, client: object, task: str, url: str, title: str, excerpt: str) -> str:
         return self.summary_text
+
+    async def visual_answer(self, client: object, task: str, url: str, title: str, image: str) -> None:
+        return None
 
 
 VIEW = PageView(
@@ -164,6 +172,71 @@ def test_chosen_click_runs_by_element_id_then_stops_when_done() -> None:
     complete = events[-1]
     assert complete["event"] == "complete"
     assert complete["data"]["result"] == "晴れ、25度"
+
+
+def test_low_probability_done_does_not_finish_early() -> None:
+    session = FakeSession(VIEW)
+    uncertain = Decision(action_id="done", confidence=0.42, done_probability=0.42)
+    events = _events(_runner(session, [uncertain, _decision("done", done=0.9)]))
+
+    assert session.actions == [("scroll",)]
+    assert events[-1]["data"]["result"] == "晴れ、25度"
+    assert any("回答を確認できない" in event["data"].get("error", "")
+               for event in events if event["event"] == "step")
+
+
+def test_low_probability_done_can_answer_from_screen_image() -> None:
+    class ImageSession(FakeSession):
+        async def vision_jpeg(self) -> str:
+            return "YQ=="
+
+    class ImageWriter(FakeWriter):
+        async def visual_answer(self, client: object, task: str, url: str, title: str, image: str) -> str:
+            assert image == "YQ=="
+            return "14時に会議"
+
+    session = ImageSession(VIEW)
+    runner = BrowserAgentRunner(
+        task="今日の予定を教えて",
+        max_steps=5,
+        decider=ScriptedDecider([Decision(action_id="done", confidence=0.38, done_probability=0.38)]),  # type: ignore[arg-type]
+        writer=ImageWriter(),  # type: ignore[arg-type]
+        session_factory=lambda: session,
+    )
+
+    events = _events(runner)
+
+    assert session.actions == []
+    assert events[-1]["event"] == "complete"
+    assert "14時に会議" in events[-1]["data"]["result"]
+
+
+def test_unconfirmed_answer_reports_error_at_step_limit() -> None:
+    session = FakeSession(VIEW)
+    runner = _runner(session, [Decision(action_id="done", confidence=0.42, done_probability=0.42)])
+    runner.max_steps = 2
+
+    events = _events(runner)
+
+    assert session.actions == [("scroll",), ("scroll",)]
+    assert events[-1]["event"] == "error"
+    assert "達成を確認できませんでした" in events[-1]["data"]["message"]
+
+
+def test_unconfirmed_answer_stops_when_scrolling_cannot_advance() -> None:
+    class UnscrollableSession(FakeSession):
+        async def scroll(self) -> bool:
+            self.actions.append(("scroll",))
+            return False
+
+    session = UnscrollableSession(VIEW)
+    runner = _runner(session, [Decision(action_id="done", confidence=0.38, done_probability=0.38)])
+
+    events = _events(runner)
+
+    assert session.actions == [("scroll",)]
+    assert events[-1]["event"] == "error"
+    assert "回答を確認できませんでした" in events[-1]["data"]["message"]
 
 
 def test_type_action_fills_the_field_and_submits_search() -> None:

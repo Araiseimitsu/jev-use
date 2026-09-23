@@ -1,6 +1,6 @@
 """DOM を読んで Jev が次の一手を選び、Playwright が実行するブラウザ操作ランナー。
 
-スクショは人が見るプレビューにだけ使い、次の操作の決定には使わない。
+スクショはプレビューと、文字情報で答えを確認できないときの回答に使う。
 """
 
 import asyncio
@@ -79,6 +79,10 @@ class SubmissionNotConfirmed(RuntimeError):
     """送信後の画面で完了を確認できなかった。"""
 
 
+class AnswerNotConfirmed(RuntimeError):
+    """指定された手順内で回答を確認できなかった。"""
+
+
 class BrowserAgentRunner:
     """ブラウザを開き、操作候補の選択と実行を繰り返す。"""
 
@@ -108,6 +112,7 @@ class BrowserAgentRunner:
         self._assist_count = 0
         self._skip_login_url = ""
         self._typed_fields: set[tuple[str, str, str]] = set()
+        self._vision_attempts = 0
         submit_instruction = SUBMIT_END.search(self.task)
         prefix = self.task[:submit_instruction.start()].rstrip().casefold() if submit_instruction else ""
         self._ends_with_submit = bool(
@@ -219,7 +224,7 @@ class BrowserAgentRunner:
                     },
                 }
             )
-        except SubmissionNotConfirmed as e:
+        except (SubmissionNotConfirmed, AnswerNotConfirmed) as e:
             emit({"event": "error", "data": {"message": str(e)}})
         except Exception as e:
             logger.exception("browser agent failed")
@@ -291,11 +296,23 @@ class BrowserAgentRunner:
                     return reason, step
                 continue
 
-            if decision.action_id == "done" or decision.done_probability >= DONE_THRESHOLD:
+            if decision.done_probability >= DONE_THRESHOLD:
                 self._emit_step(emit, step, decision, options, "")
                 return await self.writer.summary(
                     client, self.task_for_model(), view.url, view.title, view.excerpt
                 ), step
+
+            if decision.action_id == "done":
+                # 操作候補の選択だけで完了とせず、回答が揃った確率も確認する。
+                answer = await self._visual_answer(session, client, view)
+                if answer:
+                    self._emit_step(emit, step, decision, options, "")
+                    return f"画像から読み取った結果:\n{answer}", step
+                self._emit_step(emit, step, decision, options, "", "回答を確認できないため、読み取りを続けます。")
+                moved = await session.scroll()
+                if moved is False:
+                    raise AnswerNotConfirmed("画面を読み進めても回答を確認できませんでした。")
+                continue
 
             if await self._needs_stop_for_risk(emit, step, decision, options):
                 return "承認が得られなかったため停止しました。", step
@@ -323,10 +340,26 @@ class BrowserAgentRunner:
                     )
                 return await self._verify_submission(emit, session, view, submit[1], step), step
 
-        summary = await self.writer.summary(
-            client, self.task_for_model(), view.url, view.title, view.excerpt
+        answer = await self._visual_answer(session, client, view)
+        if answer:
+            return f"画像から読み取った結果:\n{answer}", step
+        raise AnswerNotConfirmed(
+            f"最大ステップ数（{self.max_steps}）に達し、指示の達成を確認できませんでした。"
         )
-        return f"最大ステップ数（{self.max_steps}）に達しました。\n{summary}", step
+
+    async def _visual_answer(
+        self, session: Any, client: httpx.AsyncClient, view: PageView
+    ) -> str | None:
+        """本文で確認できないときだけ画像を調べ、同一実行での送信回数を抑える。"""
+        if not self.writer.enabled or self._vision_attempts >= 2:
+            return None
+        self._vision_attempts += 1
+        image = await session.vision_jpeg()
+        if not image:
+            return None
+        return await self.writer.visual_answer(
+            client, self.task_for_model(), view.url, view.title, image
+        )
 
     def _submit_after_input(
         self, view: PageView, elements: tuple[Element, ...]

@@ -212,3 +212,25 @@ def test_jev_excerpt_keeps_head_and_latest_tail() -> None:
     assert text.startswith("見出し")
     assert text.endswith("最新の回答")
     assert len(text) <= 800
+
+
+def test_back_is_offered_only_when_there_is_a_page_to_return_to() -> None:
+    from app.services.page_state import action_catalog
+
+    elements = (Element("e1", "link", "次へ", "click"),)
+    assert "back" not in {option.id for option in action_catalog(elements, can_go_back=False)}
+    assert "back" in {option.id for option in action_catalog(elements)}
+
+
+def test_send_key_is_read_from_the_fields_hint() -> None:
+    from app.services.page_state import send_key
+
+    def field(name: str) -> Element:
+        return Element("e1", "textarea", name, "type")
+
+    assert send_key(field("メッセージを入力… (Ctrl+Enter で送信 / Enter で改行)")) == "ControlOrMeta+Enter"
+    assert send_key(field("Message (Cmd+Enter to send)")) == "ControlOrMeta+Enter"
+    assert send_key(field("Shift + Enter で送信")) == "Shift+Enter"
+    assert send_key(field("コメント（Enter で改行）")) is None
+    assert send_key(field("Press Enter to send")) == "Enter"
+    assert send_key(field("メッセージ")) == "Enter"

@@ -42,3 +42,46 @@ def test_phrase_without_key_does_not_call_the_network() -> None:
     text = asyncio.run(writer.phrase(None, "「富士山」の標高", "検索", "Google"))  # type: ignore[arg-type]
 
     assert text == "富士山"
+
+
+class _FakeResponse:
+    def __init__(self, data: dict) -> None:
+        import json
+
+        self._payload = {"candidates": [{"content": {"parts": [{"text": json.dumps(data, ensure_ascii=False)}]}}]}
+
+    def raise_for_status(self) -> None:
+        return None
+
+    def json(self) -> dict:
+        return self._payload
+
+
+class _FakeHttp:
+    def __init__(self, data: dict) -> None:
+        self.data = data
+        self.prompts: list[str] = []
+
+    async def post(self, url: str, headers: dict, json: dict) -> _FakeResponse:
+        self.prompts.append(json["contents"][0]["parts"][0]["text"])
+        return _FakeResponse(self.data)
+
+
+def test_phrase_is_empty_when_the_request_has_nothing_for_the_field() -> None:
+    """依頼の文字列が別の欄（メッセージ欄など）向けなら、この欄には何も入れない。"""
+    http = _FakeHttp({"fits": False, "text": "test"})
+    writer = TextWriter(api_key="key")
+
+    text = asyncio.run(writer.phrase(http, "ルームのメッセージにtestと入れて送信", "ルームを検索...", "チャット", "検索欄"))  # type: ignore[arg-type]
+
+    assert text == ""
+    assert "検索欄" in http.prompts[0]
+
+
+def test_phrase_returns_text_that_fits_the_field() -> None:
+    http = _FakeHttp({"fits": True, "text": "test"})
+    writer = TextWriter(api_key="key")
+
+    text = asyncio.run(writer.phrase(http, "メッセージにtestと入れて送信", "メッセージを入力", "チャット", "文章の入力欄"))  # type: ignore[arg-type]
+
+    assert text == "test"

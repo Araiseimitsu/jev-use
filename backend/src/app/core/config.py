@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     frontend_dir: Path = PROJECT_ROOT / "frontend"
 
     gemini_api_key: str = ""
-    # 入力文と最終回答の文章だけに使う（画面の判断には使わない）
+    # 次の操作と入力文の選択、最終回答の文章に使う（画像は送らない）
     gemini_model: str = "gemini-3.5-flash-lite"
     default_max_steps: int = 15
     # ブラウザを表示せずに操作するか
@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     # その確認を待つ上限（秒）。超えたら止める
     human_check_timeout_seconds: float = 180.0
 
-    # TypeSafe AI（System One モデル Jev）による操作の選択
+    # TypeSafe AI（System One モデル Jev）による操作の危険度の判定と実行前の見積もり
     typesafe_api_key: str = ""
     typesafe_model: str = "jev-latest"
     typesafe_timeout_seconds: float = 10.0

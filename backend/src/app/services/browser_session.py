@@ -18,6 +18,7 @@ TYPE_DELAY_MS = 20
 # ページ全体の操作できる要素を id 付きで返す。パスワード欄も見つけ、入力は人が行う。
 # 画面外の要素も読む。クリックと入力は Playwright が要素まで自動でスクロールする。
 # 上限を超えたときは 入力欄 → ボタン類 → リンク の順に残し、出力はページ上の順に戻す。
+# a や button でなくても、onclick・tabindex・指の形のカーソルを持つ div や li は押せる行として読む。
 READ_SCRIPT = r"""
 () => {
   const MAX_ELEMENTS = 150;
@@ -26,13 +27,19 @@ READ_SCRIPT = r"""
   const selector = [
     'a[href]', 'button', 'input:not([type=hidden])', 'textarea', 'select',
     '[role="button"]', '[role="link"]', '[role="textbox"]', '[role="searchbox"]',
-    '[role="tab"]', '[role="menuitem"]', '[contenteditable]:not([contenteditable="false"])'
+    '[role="tab"]', '[role="menuitem"]', '[role="menuitemradio"]', '[role="menuitemcheckbox"]',
+    '[role="option"]', '[role="treeitem"]', '[role="checkbox"]', '[role="radio"]', '[role="switch"]',
+    'summary', '[contenteditable]:not([contenteditable="false"])'
   ].join(',');
   const skipType = new Set(['hidden', 'file']);
   const textTypes = ['', 'text', 'search', 'email', 'url', 'tel', 'number', 'password'];
   const buttonTypes = ['submit', 'button', 'image', 'reset'];
   const searchName = /^(q|query|search|keywords?)$/i;
   const sendName = /送信|送る|投稿|検索|\b(send|submit|post|search)\b/i;
+  // id や class は send-button、btnSend のように単語がつながるため、境界を問わない。
+  const sendHint = /send|submit|送信/i;
+  // 名前に「検索」「送信」を含んでも、取り消し・消去のボタンは送信ボタンにしない（「検索語をクリア」など）。
+  const undoName = /クリア|消去|削除|取り消|キャンセル|閉じる|\b(clear|cancel|close|reset|delete)\b/i;
   const EXCERPT_LIMIT = 1500;
   // 長い本文は先頭と末尾を残す。チャットの最新の回答や送信結果は末尾に出る。
   const EXCERPT_HEAD = 600;
@@ -66,6 +73,13 @@ READ_SCRIPT = r"""
     const style = getComputedStyle(el);
     return style.visibility !== 'hidden' && style.display !== 'none';
   };
+  // 表示されている文字を、要素の区切りごとに空白を挟んで読む。
+  // innerText は横に並んだ span をつなげてしまい、アイコンの頭文字と名前が「ttest」のようになるため。
+  const spacedText = node => {
+    if (node.nodeType === 3) return node.textContent;
+    if (node.nodeType !== 1 || getComputedStyle(node).display === 'none') return '';
+    return Array.from(node.childNodes).map(spacedText).join(' ');
+  };
   const labelledBy = el => {
     const root = el.getRootNode();
     return (el.getAttribute('aria-labelledby') || '').split(/\s+/)
@@ -73,11 +87,27 @@ READ_SCRIPT = r"""
       .filter(Boolean).map(node => node.innerText || node.textContent).join(' ');
   };
 
+  const pointer = el => Boolean(el) && el.nodeType === 1 && getComputedStyle(el).cursor === 'pointer';
+  // 決まったタグや role を持たないが押せる要素か。カーソルは子に受け継がれるため、指の形が始まる要素だけを取る。
+  // ボタンやリンクの中の span、1 つのリンクを包むだけの div は、同じ操作を二重に数えるので除く。
+  const looseClickable = el => {
+    if (el === document.body || el === document.documentElement) return false;
+    if (el.parentElement && el.parentElement.closest(selector)) return false;
+    const tabindex = el.getAttribute('tabindex');
+    const marked = el.hasAttribute('onclick') || (tabindex !== null && Number(tabindex) >= 0)
+      || (pointer(el) && !pointer(el.parentElement));
+    if (!marked) return false;
+    const text = clean(el.innerText);
+    return Boolean(text) && !Array.from(el.querySelectorAll(selector)).some(node => clean(node.innerText) === text);
+  };
+
   const seenLinks = new Set();
   const found = [];
   let order = 0;
   for (const root of roots) {
-    for (const el of root.querySelectorAll(selector)) {
+    for (const el of root.querySelectorAll('*')) {
+      const loose = !el.matches(selector);
+      if (loose && !looseClickable(el)) continue;
       order += 1;
       if (!visible(el)) continue;
       const tag = el.tagName.toLowerCase();
@@ -88,7 +118,8 @@ READ_SCRIPT = r"""
         || explicitRole === 'textbox' || explicitRole === 'searchbox'
         || (tag === 'input' && textTypes.includes(inputType));
       const role = explicitRole || (
-        tag === 'a' ? 'link' : tag === 'button' ? 'button' : tag === 'select' ? 'combobox'
+        loose ? 'item'
+        : tag === 'a' ? 'link' : tag === 'button' ? 'button' : tag === 'select' ? 'combobox'
         : el.isContentEditable ? 'textbox' : tag
       );
       const kind = textLike ? 'type' : 'click';
@@ -96,20 +127,27 @@ READ_SCRIPT = r"""
         ? Array.from(el.labels).map(node => node.innerText).join(' ')
         : '';
       // 入力欄の innerText は入力済みの中身なので名前に使わない。
-      const inner = textLike ? '' : el.innerText;
+      const inner = textLike ? '' : spacedText(el);
       const image = el.querySelector('img[alt]');
+      const svgTitle = el.querySelector('svg title');
       const buttonValue = tag === 'input' && buttonTypes.includes(inputType) ? el.value : '';
       const name = clean(
         el.getAttribute('aria-label') || labelledBy(el) || el.getAttribute('placeholder')
         || el.getAttribute('aria-placeholder') || el.getAttribute('data-placeholder') || labelled
         || inner || buttonValue || el.getAttribute('title') || (image ? image.alt : '')
-        || el.getAttribute('name')
+        || (svgTitle ? svgTitle.textContent : '') || el.getAttribute('name')
       ).slice(0, 80);
+      const buttonLike = !textLike && (
+        tag === 'button' || role === 'button' || (tag === 'input' && buttonTypes.includes(inputType))
+      );
+      // 文字の無いアイコンのボタン。チャットの送信ボタンに多いため捨てずに、id や class の手がかりで名前を付ける。
+      const iconHint = [el.id, el.getAttribute('class'), el.getAttribute('data-testid')].join(' ');
       const autocomplete = (el.getAttribute('autocomplete') || '').toLowerCase();
       const label = name || (
         inputType === 'password' || autocomplete.includes('password') ? 'パスワード'
         : autocomplete === 'username' || autocomplete === 'email' ? 'ユーザー名'
-        : kind === 'type' ? '入力欄' : ''
+        : kind === 'type' ? '入力欄'
+        : buttonLike ? (sendHint.test(iconHint) ? '送信（アイコン）' : 'アイコンのボタン') : ''
       );
       if (!label) continue;
       if (role === 'link') {
@@ -123,9 +161,6 @@ READ_SCRIPT = r"""
         inputType === 'search' || role === 'searchbox' || Boolean(el.closest('[role="search"]'))
         || searchName.test(el.getAttribute('name') || '')
         || /search|検索/i.test(form ? form.getAttribute('action') || '' : '')
-      );
-      const buttonLike = !textLike && (
-        tag === 'button' || role === 'button' || (tag === 'input' && buttonTypes.includes(inputType))
       );
       const priority = textLike ? 0 : role === 'link' ? 2 : 1;
       found.push({ el, order, priority, role, label, kind, inputType, autocomplete, form, search, buttonLike });
@@ -148,7 +183,7 @@ READ_SCRIPT = r"""
   // 3) 送信らしいボタンが無ければ、最初にボタンを含んだ祖先にボタンが 1 つだけのときそれ。
   const buttons = kept.filter(item => item.buttonLike);
   // type 属性の無い button は form の外でも type が submit になるので、form に属するものだけ数える。
-  const sendLike = b => (b.el.form && b.el.type === 'submit') || sendName.test(b.label);
+  const sendLike = b => !undoName.test(b.label) && ((b.el.form && b.el.type === 'submit') || sendName.test(b.label));
   const submitFor = field => {
     if (field.form) {
       const submits = buttons.filter(b => field.form.contains(b.el) && b.el.type === 'submit');
@@ -278,6 +313,11 @@ class BrowserSession:
         if submit:
             await locator.press("Enter")
             await self._settle()
+
+    async def press_key(self, element_id: str, key: str) -> None:
+        """入力欄でキーを押す。送信ボタンの無いチャット欄の送信（Enter、Ctrl+Enter など）に使う。"""
+        await self._locator(element_id).press(key, timeout=8000)
+        await self._settle()
 
     async def back(self) -> None:
         await self._page.go_back(wait_until="domcontentloaded", timeout=8000)

@@ -48,6 +48,19 @@ def test_browser_run_requires_typesafe_key(monkeypatch) -> None:
     assert "TYPESAFE_API_KEY" in response.json()["detail"]
 
 
+def test_browser_run_requires_gemini_key(monkeypatch) -> None:
+    """次の操作を Gemini が選ぶため、キーが無ければ始めない。"""
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "typesafe_api_key", "set")
+    monkeypatch.setattr(settings, "gemini_api_key", "")
+
+    response = client.post("/api/browser/run", json={"task": "天気を調べる"})
+
+    assert response.status_code == 400
+    assert "GEMINI_API_KEY" in response.json()["detail"]
+
+
 def test_browser_run_rejects_too_many_steps() -> None:
     response = client.post("/api/browser/run", json={"task": "天気を調べる", "max_steps": 51})
 

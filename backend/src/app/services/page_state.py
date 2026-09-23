@@ -7,8 +7,9 @@ import re
 from dataclasses import asdict, dataclass
 from urllib.parse import urlparse
 
-# Jev の Choice に載せる要素の上限。制御操作（戻る等）は別に足す。
-MAX_CANDIDATES = 12
+# 次の操作を選ぶ Gemini に渡す要素の上限。制御操作（戻る等）は別に足す。
+# ナビやボタンが多いページでも、一覧の行や送信ボタンが漏れにくい数にする。
+MAX_CANDIDATES = 40
 # Jev に渡す本文の上限（state を小さく保つ）
 EXCERPT_FOR_JEV = 800
 # 本文を切り詰めるとき先頭に残す文字数。残りは末尾から取る（チャットの最新の回答は末尾にある）。
@@ -27,6 +28,12 @@ _PASS_LINE = re.compile(
 _USERNAME_HINTS = ("ユーザー", "ユーザ", "username", "user name", "login", "ログイン", "アカウント", "email", "e-mail", "メール")
 _PASSWORD_HINTS = ("password", "passwd", "パスワード")
 _SECRET_MASK = "［パスワード］"
+# 入力欄の案内に書かれた送信キー（「Ctrl+Enter で送信」「Cmd+Enter to send」など）
+_SEND_WORD = r"(?:で|to|for)?\s*(?:送信|投稿|send|post|submit)"
+_CTRL_ENTER_SEND = re.compile(r"(?:ctrl|control|cmd|command|⌘)\s*\+\s*enter\s*" + _SEND_WORD, re.IGNORECASE)
+_SHIFT_ENTER_SEND = re.compile(r"shift\s*\+\s*enter\s*" + _SEND_WORD, re.IGNORECASE)
+# 修飾キーの付かない Enter が改行だと書かれているか
+_ENTER_NEWLINE = re.compile(r"(?<![+\w])\s*enter\s*(?:で|to|for)?\s*(?:改行|new\s*line|line\s*break)", re.IGNORECASE)
 _MIN_SECRET_LENGTH = 4
 
 # サイトが人の操作を求めて出している確認画面。本文の偶然の一致を避けるため、文言は確認画面に特有なものだけにする。
@@ -215,9 +222,9 @@ def _leave_to_user(element: Element, defer_login: bool) -> bool:
 
 
 def action_catalog(
-    elements: tuple[Element, ...] | list[Element], *, defer_login: bool = False
+    elements: tuple[Element, ...] | list[Element], *, defer_login: bool = False, can_go_back: bool = True
 ) -> tuple[ActionOption, ...]:
-    """要素と、いつでも選べる制御操作を候補にする。"""
+    """要素と制御操作を候補にする。戻り先が無いページでは「戻る」を出さない（about:blank に出てしまう）。"""
     options: list[ActionOption] = []
     for element in elements:
         if element.disabled:
@@ -230,7 +237,7 @@ def action_catalog(
         else:
             description = f"「{element.name}」（{element.role}）をクリックする"
             options.append(ActionOption(f"click:{element.id}", description))
-    options.extend(CONTROL_ACTIONS)
+    options.extend(option for option in CONTROL_ACTIONS if can_go_back or option.id != "back")
     return tuple(options)
 
 
@@ -248,6 +255,22 @@ def submits_on_enter(element: Element) -> bool:
     それ以外の欄では押さない。チャット欄の Enter は送信になり、送信ボタンの承認を経ずに送ってしまうため。
     """
     return is_search_field(element)
+
+
+def send_key(element: Element) -> str | None:
+    """送信ボタンの無い欄で、送信に使うキー。欄の名前や案内（placeholder）に書かれたものに従う。
+
+    「Ctrl+Enter で送信 / Enter で改行」のような欄で Enter を押すと、送らずに改行してしまうため。
+    Enter が改行だと書かれ、送信のキーが書かれていなければ None（キーでは送らない）。
+    """
+    name = element.name
+    if _CTRL_ENTER_SEND.search(name):
+        return "ControlOrMeta+Enter"
+    if _SHIFT_ENTER_SEND.search(name):
+        return "Shift+Enter"
+    if _ENTER_NEWLINE.search(name):
+        return None
+    return "Enter"
 
 
 def field_kind(element: Element) -> str:

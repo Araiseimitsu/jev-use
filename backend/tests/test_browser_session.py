@@ -145,3 +145,83 @@ def test_excerpt_reads_main_and_keeps_the_latest_text() -> None:
         assert len(view.excerpt) <= 1500
 
     _with_page(html, check)
+
+
+def test_read_finds_clickable_rows_without_link_or_button_tags() -> None:
+    """div や li で作られた一覧の行も、押せる見た目や onclick があれば候補にする。"""
+    html = (
+        '<ul><li style="cursor:pointer"><span>test ルーム</span><span>3 件</span></li>'
+        '<li onclick="void 0">営業部</li><li>押せない行</li></ul>'
+        '<div role="option">候補A</div>'
+        '<button style="cursor:pointer"><span style="cursor:pointer">送信</span></button>'
+        '<div style="cursor:pointer"><a href="/x">中のリンク</a></div>'
+    )
+
+    async def check(session: BrowserSession, page) -> None:
+        view = await session.read()
+        names = [element.name for element in view.elements]
+        assert any(name.startswith("test ルーム") for name in names)
+        assert "営業部" in names
+        assert "候補A" in names
+        assert "押せない行" not in names
+        # ボタンの中の span や、リンクを包む div を二重に数えない。
+        assert names.count("送信") == 1
+        assert names.count("中のリンク") == 1
+        assert len(names) == 5
+        row = next(element for element in view.elements if element.name == "営業部")
+        assert row.kind == "click"
+        await session.click(row.id)
+
+    _with_page(html, check)
+
+
+def test_icon_only_buttons_are_named_and_become_the_send_button() -> None:
+    """文字も aria-label も無いアイコンのボタンも候補にし、チャット欄の送信ボタンにする。"""
+    html = (
+        '<input placeholder="ルームを検索...">'
+        '<div class="composer"><textarea placeholder="メッセージを入力"></textarea>'
+        '<button class="icon"><svg width="20" height="20"><path d="M0 0L20 10L0 20z"/></svg></button></div>'
+        '<div class="toolbar"><button class="btn-send-message"><svg width="20" height="20"></svg></button></div>'
+        '<button><svg width="20" height="20"><title>Attach</title></svg></button>'
+    )
+
+    async def check(session: BrowserSession, page) -> None:
+        view = await session.read()
+        by_name = {element.name: element for element in view.elements}
+        assert by_name["メッセージを入力"].submit_id == by_name["アイコンのボタン"].id
+        assert "送信（アイコン）" in by_name
+        assert "Attach" in by_name
+
+    _with_page(html, check)
+
+
+def test_names_keep_spaces_between_inline_parts() -> None:
+    """アイコンの頭文字と名前のように並んだ span は、つなげず空白で区切る（「ttest」にしない）。"""
+    html = (
+        '<div class="room" style="cursor:pointer"><span>t</span><span>test</span></div>'
+        '<a href="/r"><span>営</span><span>営業部</span></a>'
+        '<button><span style="display:none">隠し</span><span>送信</span></button>'
+    )
+
+    async def check(session: BrowserSession, page) -> None:
+        names = [element.name for element in (await session.read()).elements]
+        assert names == ["t test", "営 営業部", "送信"]
+
+    _with_page(html, check)
+
+
+def test_clear_button_is_not_taken_for_the_send_button() -> None:
+    """「検索語をクリア」「キャンセル」などは、名前に検索や送信を含んでも送信ボタンにしない。"""
+    html = (
+        '<aside><input type="search" placeholder="ルームを検索...">'
+        '<button aria-label="検索語をクリア">×</button><button>1対1チャットを開始</button></aside>'
+        '<div class="composer"><textarea placeholder="メッセージ"></textarea>'
+        '<button>送信をキャンセル</button><button>送信</button></div>'
+    )
+
+    async def check(session: BrowserSession, page) -> None:
+        by_name = {element.name: element for element in (await session.read()).elements}
+        assert by_name["ルームを検索..."].submit_id != by_name["検索語をクリア"].id
+        assert by_name["メッセージ"].submit_id == by_name["送信"].id
+
+    _with_page(html, check)

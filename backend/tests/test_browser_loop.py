@@ -44,6 +44,9 @@ class FakeSession:
     async def fill(self, element_id: str, text: str, submit: bool) -> None:
         self.actions.append(("fill", element_id, text, submit))
 
+    async def press_key(self, element_id: str, key: str) -> None:
+        self.actions.append(("key", element_id, key))
+
     async def back(self) -> None:
         self.actions.append(("back",))
 
@@ -65,9 +68,13 @@ class ScriptedDecider:
         self.decisions = decisions
         self.calls = 0
         self.tasks: list[str] = []
+        self.histories: list[tuple[str, ...]] = []
 
-    async def decide(self, task: str, view: PageView, options: tuple) -> Decision:
+    async def decide(
+        self, task: str, view: PageView, options: tuple, history: tuple[str, ...] = (), **_: object
+    ) -> Decision:
         self.tasks.append(task)
+        self.histories.append(history)
         decision = self.decisions[min(self.calls, len(self.decisions) - 1)]
         self.calls += 1
         return decision
@@ -79,7 +86,9 @@ class FakeWriter:
         self.summary_text = summary
         self.phrase_tasks: list[str] = []
 
-    async def phrase(self, client: object, task: str, field_name: str, page_title: str) -> str:
+    async def phrase(
+        self, client: object, task: str, field_name: str, page_title: str, field_kind: str = ""
+    ) -> str:
         self.phrase_tasks.append(task)
         return self.phrase_text
 
@@ -199,7 +208,9 @@ def test_message_is_typed_before_send_becomes_an_option() -> None:
     class ChatDecider:
         enabled = True
 
-        async def decide(self, task: str, view: PageView, options: tuple) -> Decision:
+        async def decide(
+            self, task: str, view: PageView, options: tuple, history: tuple[str, ...] = (), **_: object
+        ) -> Decision:
             ids = {option.id for option in options}
             if "type:e1" in ids:
                 return _decision("type:e1")
@@ -430,10 +441,12 @@ def test_jev_selected_send_on_prefilled_form_is_verified() -> None:
         session_factory=lambda: session,
     )
 
-    events = _events(runner)
+    events = _approved_events(runner)
 
     assert session.actions.count(("click", "e2")) == 1
     assert session.reads >= 2
+    # 選んだ側の危険度に関わらず、送信は承認を経る。
+    assert any(event["event"] == "confirm_request" for event in events)
     assert "入力欄がクリア" in events[-1]["data"]["result"]
 
 
@@ -603,3 +616,359 @@ def test_same_action_three_times_stops() -> None:
 
     assert session.actions == [("click", "e2"), ("click", "e2")]
     assert "繰り返して" in events[-1]["data"]["result"]
+
+
+def test_actions_that_cycle_on_the_same_page_stop() -> None:
+    """A→B→A→B→A のように、連続しなくても同じページで同じ操作を繰り返したら止める。"""
+    session = FakeSession(VIEW)
+    decisions = [_decision("back"), _decision("click:e2")] * 3
+    events = _events(_runner(session, decisions, headless=True))
+
+    assert session.actions == [("back",), ("click", "e2"), ("back",), ("click", "e2")]
+    assert "繰り返して" in events[-1]["data"]["result"]
+
+
+def test_previous_actions_are_passed_to_jev() -> None:
+    """Jev が同じ入力を繰り返さないよう、実行済みの操作と入力した文字列を渡す。"""
+    session = FakeSession(VIEW)
+    decider = ScriptedDecider([_decision("type:e1"), _decision("done", done=0.9)])
+    runner = BrowserAgentRunner(
+        task="東京の天気を調べて",
+        max_steps=5,
+        decider=decider,  # type: ignore[arg-type]
+        writer=FakeWriter(),  # type: ignore[arg-type]
+        session_factory=lambda: session,
+    )
+    _events(runner)
+
+    assert decider.histories[0] == ()
+    assert len(decider.histories[1]) == 1
+    entry = decider.histories[1][0]
+    assert "検索" in entry and "東京 天気" in entry
+    # FakeSession は操作しても画面が変わらない。その事実も伝える。
+    assert "変化なし" in entry
+
+
+def test_task_ending_with_bare_send_noun_asks_to_submit() -> None:
+    assert BrowserAgentRunner(task="ルームを開いてメッセージにtestを入れて送信")._ends_with_submit
+    assert BrowserAgentRunner(task="testと入力して送信。")._ends_with_submit
+    assert not BrowserAgentRunner(task="送信履歴を見て")._ends_with_submit
+
+
+def test_field_without_send_button_submits_with_enter_after_approval() -> None:
+    """送信ボタンの無いチャット欄（Enter で送る）は、承認を経て Enter を押し、欄が空いたことを確かめる。"""
+
+    class EnterChat(FakeSession):
+        async def fill(self, element_id: str, text: str, submit: bool) -> None:
+            await super().fill(element_id, text, submit)
+            self.view = PageView(self.view.url, self.view.title, "", (
+                Element("e1", "textarea", "メッセージを入力", "type", filled=True),
+            ))
+
+        async def press_key(self, element_id: str, key: str) -> None:
+            await super().press_key(element_id, key)
+            self.view = PageView(self.view.url, self.view.title, "test", (
+                Element("e1", "textarea", "メッセージを入力", "type"),
+            ))
+
+    session = EnterChat(PageView("https://example.com/room/1", "test", "", (
+        Element("e1", "textarea", "メッセージを入力", "type"),
+    )))
+    runner = BrowserAgentRunner(
+        task="https://example.com/room/1 のメッセージにtestを入れて送信",
+        max_steps=4,
+        headless=True,
+        decider=ScriptedDecider([_decision("type:e1")]),  # type: ignore[arg-type]
+        writer=FakeWriter(phrase="test"),  # type: ignore[arg-type]
+        session_factory=lambda: session,
+    )
+
+    events = _approved_events(runner)
+
+    assert [action for action in session.actions if action[0] != "wait"] == [
+        ("fill", "e1", "test", False), ("key", "e1", "Enter")
+    ]
+    confirm = next(event for event in events if event["event"] == "confirm_request")
+    assert "Enter" in confirm["data"]["action"]["description"]
+    assert "入力欄がクリア" in events[-1]["data"]["result"]
+
+
+def test_enter_is_not_pressed_in_a_form_or_without_request() -> None:
+    url = "https://example.com/chat"
+    loose = PageView(url, "会話", "", (Element("e1", "textarea", "メッセージ", "type", filled=True),))
+    runner = BrowserAgentRunner(task="testと入れて送信して")
+    runner._typed_fields.add((url, "", "メッセージ"))
+    submit = runner._submit_after_input(loose)
+    assert submit is not None and submit[0].action_id == "key:e1"
+
+    # form の中で送信ボタンを決められない欄は、Enter でも送らない。
+    in_form = PageView(url, "会話", "", (
+        Element("e1", "textarea", "メッセージ", "type", filled=True, form_id="f1"),
+        Element("e2", "button", "送信", "click", form_id="f1"),
+    ))
+    runner._typed_fields.add((url, "f1", "メッセージ"))
+    assert runner._submit_after_input(in_form) is None
+
+    not_requested = BrowserAgentRunner(task="testと入れて")
+    not_requested._typed_fields.add((url, "", "メッセージ"))
+    assert not_requested._submit_after_input(loose) is None
+
+
+def test_field_typed_once_is_not_offered_again_even_after_it_is_cleared() -> None:
+    """入力後に欄が空に戻っても（Enter で検索、描き直し、別ページから戻るなど）、同じ欄には入れ直さない。"""
+
+    class ClearingSearch(FakeSession):
+        async def fill(self, element_id: str, text: str, submit: bool) -> None:
+            await super().fill(element_id, text, submit)
+            # 検索すると URL が変わり、欄は空に戻り、結果の行が出る。
+            self.view = PageView("https://example.com/rooms?q=test", "ルーム", "", (
+                Element("e1", "input", "ルームを検索...", "type", input_type="search"),
+                Element("e2", "item", "test", "click"),
+            ))
+
+    class PrefersTyping:
+        enabled = True
+
+        def __init__(self) -> None:
+            self.offered: list[set[str]] = []
+
+        async def decide(self, task, view, options, history=(), **_) -> Decision:
+            ids = {option.id for option in options}
+            self.offered.append(ids)
+            if "type:e1" in ids:
+                return _decision("type:e1")
+            return _decision("click:e2") if "click:e2" in ids else _decision("done", done=0.9)
+
+    session = ClearingSearch(PageView("https://example.com/rooms", "ルーム", "", (
+        Element("e1", "input", "ルームを検索...", "type", input_type="search"),
+    )))
+    decider = PrefersTyping()
+    runner = BrowserAgentRunner(
+        task="ルーム検索にtestと入れてルームを開く",
+        max_steps=3,
+        headless=True,
+        decider=decider,  # type: ignore[arg-type]
+        writer=FakeWriter(phrase="test"),  # type: ignore[arg-type]
+        session_factory=lambda: session,
+    )
+    _events(runner)
+
+    assert [action[:2] for action in session.actions][:2] == [("fill", "e1"), ("click", "e2")]
+    assert all("type:e1" not in offered for offered in decider.offered[1:])
+
+
+def test_failed_input_can_be_tried_again() -> None:
+    class FailingOnce(FakeSession):
+        failed = False
+
+        async def fill(self, element_id: str, text: str, submit: bool) -> None:
+            if not self.failed:
+                self.failed = True
+                raise RuntimeError("入力欄に指定した文字列が反映されませんでした。")
+            await super().fill(element_id, text, submit)
+
+    session = FailingOnce(VIEW)
+    _events(_runner(session, [_decision("type:e1"), _decision("type:e1"), _decision("done", done=0.9)]))
+
+    assert [action[0] for action in session.actions] == ["fill"]
+
+
+def test_field_with_nothing_to_enter_is_skipped_and_not_offered_again() -> None:
+    """依頼に合う内容が無い欄（メッセージを送りたいのに検索欄しか無いなど）には入れず、別の操作へ進ませる。"""
+    view = PageView("https://example.com/chat", "チャット", "", (
+        Element("e1", "input", "ルームを検索...", "type", input_type="search"),
+        Element("e2", "item", "test", "click"),
+    ))
+    session = FakeSession(view)
+    decider = ScriptedDecider([_decision("type:e1"), _decision("click:e2"), _decision("done", done=0.9)])
+    runner = BrowserAgentRunner(
+        task="ルームのメッセージにtestと入れて送信",
+        max_steps=4,
+        headless=True,
+        decider=decider,  # type: ignore[arg-type]
+        writer=FakeWriter(phrase=""),  # type: ignore[arg-type]
+        session_factory=lambda: session,
+    )
+    events = _events(runner)
+
+    assert session.actions == [("click", "e2")]
+    assert "入力しなかった" in decider.histories[1][0]
+    step = next(event for event in events if event["event"] == "step")
+    assert "入力しない" in step["data"]["action"]["text"]
+
+
+def test_back_is_not_offered_on_the_first_page() -> None:
+    """開いた直後のページで「戻る」を選ぶと about:blank に出てしまうため、候補に出さない。"""
+
+    class Recording(ScriptedDecider):
+        def __init__(self, decisions) -> None:
+            super().__init__(decisions)
+            self.offered: list[set[str]] = []
+
+        async def decide(self, task, view, options, history=(), **_):
+            self.offered.append({option.id for option in options})
+            return await super().decide(task, view, options, history)
+
+    class Moving(FakeSession):
+        async def click(self, element_id: str) -> None:
+            await super().click(element_id)
+            self.view = PageView("https://www.google.com/next", "次", "", self.view.elements)
+
+    session = Moving(VIEW)
+    decider = Recording([_decision("click:e2"), _decision("done", done=0.9)])
+    runner = BrowserAgentRunner(
+        task="東京の天気を調べて",
+        max_steps=3,
+        decider=decider,  # type: ignore[arg-type]
+        writer=FakeWriter(),  # type: ignore[arg-type]
+        session_factory=lambda: session,
+    )
+    _events(runner)
+
+    assert "back" not in decider.offered[0]
+    assert "back" in decider.offered[1]
+
+
+def test_send_request_does_not_click_the_search_fields_button() -> None:
+    """送信の依頼はメッセージなどの欄に向ける。検索欄は入力時の Enter で検索済みなので、横のボタンは押さない。"""
+    url = "https://example.com/chat"
+    view = PageView(url, "チャット", "", (
+        Element("e1", "input", "ルームを検索...", "type", input_type="search", filled=True, submit_id="e2"),
+        Element("e2", "button", "検索語をクリア", "click"),
+    ))
+    runner = BrowserAgentRunner(task="test2 を開いて hello と送信して")
+    runner._typed_fields.add((url, "", "ルームを検索..."))
+
+    assert runner._submit_after_input(view) is None
+    assert runner._submit_targets(view) == frozenset()
+
+
+def test_unsure_done_before_sending_is_not_reported_as_complete() -> None:
+    """送信を頼まれて何も送っていないのに、確信の低い done で終わると、失敗が成功に見えてしまう。"""
+    session = FakeSession(VIEW)
+    runner = BrowserAgentRunner(
+        task="helloと送信して",
+        max_steps=4,
+        headless=True,
+        decider=ScriptedDecider([_decision("done", done=0.1)]),  # type: ignore[arg-type]
+        writer=FakeWriter(),  # type: ignore[arg-type]
+        session_factory=lambda: session,
+    )
+    events = _events(runner)
+
+    assert "送信まで進めなかった" in events[-1]["data"]["result"]
+
+    # 送信の依頼が無ければ、従来どおり Jev の done で終える。
+    plain = FakeSession(VIEW)
+    done_events = _events(_runner(plain, [_decision("done", done=0.1)]))
+    assert done_events[-1]["data"]["result"] == "晴れ、25度"
+
+
+def _form_view(name: bool = False, email: bool = False, body: bool = False) -> PageView:
+    return PageView("https://example.com/contact", "お問い合わせ", "", (
+        Element("e1", "input", "お名前", "type", filled=name, form_id="f1", submit_id="e4"),
+        Element("e2", "input", "メールアドレス", "type", "email", filled=email, form_id="f1", submit_id="e4"),
+        Element("e3", "textarea", "内容", "type", filled=body, form_id="f1", submit_id="e4"),
+        Element("e4", "button", "確認画面へ", "click", input_type="submit", form_id="f1"),
+    ))
+
+
+def test_form_is_not_submitted_until_all_its_fields_are_filled() -> None:
+    url = "https://example.com/contact"
+    runner = BrowserAgentRunner(task="山田で問い合わせを送信して")
+    runner._typed_fields.add((url, "f1", "お名前"))
+
+    assert runner._submit_after_input(_form_view(name=True)) is None
+    submit = runner._submit_after_input(_form_view(name=True, email=True, body=True))
+    assert submit is not None and submit[0].action_id == "click:e4"
+
+
+def test_form_with_a_confirm_page_goes_on_to_the_final_send() -> None:
+    """確認画面へ進んだら終わらずに続け、確認画面の「送信する」を押して完了を確かめる。"""
+
+    class ContactSite(FakeSession):
+        async def fill(self, element_id: str, text: str, submit: bool) -> None:
+            await super().fill(element_id, text, submit)
+            filled = {action[1] for action in self.actions if action[0] == "fill"}
+            self.view = _form_view("e1" in filled, "e2" in filled, "e3" in filled)
+
+        async def click(self, element_id: str) -> None:
+            await super().click(element_id)
+            if element_id == "e4":
+                self.view = PageView("https://example.com/contact", "確認", "内容の確認", (
+                    Element("c1", "button", "修正する", "click"),
+                    Element("c2", "button", "送信する", "click"),
+                ))
+            elif element_id == "c2":
+                self.view = PageView(
+                    "https://example.com/contact", "完了", "送信しました", (), feedback="お問い合わせを受け付けました"
+                )
+
+    session = ContactSite(_form_view())
+    decider = ScriptedDecider([
+        _decision("type:e1"), _decision("type:e2"), _decision("type:e3"),
+        _decision("click:c2", risk=0.9), _decision("done", done=1.0),
+    ])
+    runner = BrowserAgentRunner(
+        task="https://example.com/contact で山田として問い合わせを送信して",
+        max_steps=8,
+        headless=True,
+        decider=decider,  # type: ignore[arg-type]
+        writer=FakeWriter(phrase="山田", summary="お問い合わせを受け付けました"),  # type: ignore[arg-type]
+        session_factory=lambda: session,
+    )
+
+    events = _approved_events(runner)
+
+    clicks = [action for action in session.actions if action[0] == "click"]
+    assert clicks == [("click", "e4"), ("click", "c2")]
+    assert events[-1]["event"] == "complete"
+    assert events[-1]["data"]["result"] == "お問い合わせを受け付けました"
+
+
+def test_send_key_follows_the_fields_hint() -> None:
+    """欄の案内に「Ctrl+Enter で送信 / Enter で改行」とあれば、Enter ではなく Ctrl+Enter で送る。"""
+    url = "https://example.com/chat"
+    runner = BrowserAgentRunner(task="testと入れて送信して")
+
+    ctrl = PageView(url, "会話", "", (
+        Element("e1", "textarea", "メッセージを入力… (Ctrl+Enter で送信 / Enter で改行)", "type", filled=True),
+    ))
+    runner._typed_fields.add((url, "", ctrl.elements[0].name))
+    submit = runner._submit_after_input(ctrl)
+    assert submit is not None and submit[0].action_id == "key:e1"
+
+    # Enter が改行で、送信のキーが書かれていない欄は、キーでは送らない（送信ボタンを探させる）。
+    newline = PageView(url, "会話", "", (
+        Element("e1", "textarea", "メッセージ（Enter で改行）", "type", filled=True),
+    ))
+    runner._typed_fields.add((url, "", newline.elements[0].name))
+    assert runner._submit_after_input(newline) is None
+
+
+def test_ctrl_enter_is_pressed_for_a_ctrl_enter_field() -> None:
+    class CtrlChat(FakeSession):
+        async def fill(self, element_id: str, text: str, submit: bool) -> None:
+            await super().fill(element_id, text, submit)
+            self.view = PageView(self.view.url, self.view.title, "", (Element("e1", "textarea", NAME, "type", filled=True),))
+
+        async def press_key(self, element_id: str, key: str) -> None:
+            await super().press_key(element_id, key)
+            self.view = PageView(self.view.url, self.view.title, "test", (Element("e1", "textarea", NAME, "type"),))
+
+    NAME = "メッセージを入力… (Ctrl+Enter で送信 / Enter で改行)"
+    session = CtrlChat(PageView("https://example.com/room/1", "test", "", (Element("e1", "textarea", NAME, "type"),)))
+    runner = BrowserAgentRunner(
+        task="https://example.com/room/1 でtestと送信して",
+        max_steps=4,
+        headless=True,
+        decider=ScriptedDecider([_decision("type:e1")]),  # type: ignore[arg-type]
+        writer=FakeWriter(phrase="test"),  # type: ignore[arg-type]
+        session_factory=lambda: session,
+    )
+    events = _approved_events(runner)
+
+    assert ("key", "e1", "ControlOrMeta+Enter") in session.actions
+    confirm = next(event for event in events if event["event"] == "confirm_request")
+    assert "Ctrl+Enter" in confirm["data"]["action"]["description"]
+    assert "入力欄がクリア" in events[-1]["data"]["result"]

@@ -265,15 +265,47 @@ button:focus-visible {
   box-shadow: 0 0 0 4px var(--focus);
 }
 
-/* プリセット・静かなボタン */
-.presets {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+/* 最近の履歴 */
+.recent-history {
   margin-top: 10px;
+  font-size: 13px;
 }
 
-.presets button,
+.recent-history summary {
+  width: fit-content;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.recent-history ul {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.recent-history li + li { border-top: 1px solid var(--line); }
+
+.recent-history button {
+  display: block;
+  width: 100%;
+  padding: 8px 4px;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.recent-history button:hover { color: var(--accent); }
+
+.recent-history button:focus-visible {
+  border-radius: 4px;
+  outline: 2px solid var(--accent);
+}
+
+/* 静かなボタン */
 .quiet {
   border: 1px solid var(--line);
   border-radius: 980px;
@@ -287,7 +319,6 @@ button:focus-visible {
     transform 0.18s ease, box-shadow 0.18s ease;
 }
 
-.presets button:hover,
 .quiet:hover {
   background: var(--accent-soft);
   border-color: rgba(0, 113, 227, 0.4);
@@ -295,7 +326,6 @@ button:focus-visible {
   transform: translateY(-1px);
 }
 
-.presets button:active,
 .quiet:active { transform: translateY(0) scale(0.98); }
 
 #stop-btn {
@@ -548,7 +578,6 @@ button:focus-visible {
     }
   }
 
-  .presets button:hover,
   .quiet:hover {
     background: var(--accent-soft);
     border-color: rgba(10, 132, 255, 0.45);

@@ -23,12 +23,57 @@ const denyBtn = document.querySelector("#deny-btn");
 const result = document.querySelector("#result");
 const resultText = document.querySelector("#result-text");
 const copyBtn = document.querySelector("#copy-btn");
+const recentHistory = document.querySelector("#recent-history");
+const historyList = document.querySelector("#history-list");
+const HISTORY_KEY = "jev-use:recent-tasks";
+const HISTORY_LIMIT = 5;
 
 let runId = "";
 let acceptedTask = "";
 let abortController = null;
 // 設定を読めなかったときは画面の初期値に従う
 let headless = headlessToggle.checked;
+let recentTasks = loadRecentTasks();
+
+function loadRecentTasks() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]");
+    return Array.isArray(saved)
+      ? saved.filter((task) => typeof task === "string" && task.trim()).slice(0, HISTORY_LIMIT)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function renderRecentTasks() {
+  recentHistory.hidden = recentTasks.length === 0;
+  historyList.replaceChildren();
+  for (const task of recentTasks) {
+    const item = document.createElement("li");
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = task;
+    button.addEventListener("click", () => {
+      taskInput.value = task;
+      resetConfirmation();
+      recentHistory.open = false;
+      taskInput.focus();
+    });
+    item.append(button);
+    historyList.append(item);
+  }
+}
+
+function saveRecentTask(task) {
+  recentTasks = [task, ...recentTasks.filter((saved) => saved !== task)].slice(0, HISTORY_LIMIT);
+  try {
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(recentTasks));
+  } catch {
+    // 保存できない環境でも、現在の画面では履歴を使えるようにする。
+  }
+  renderRecentTasks();
+}
 
 // 文言から状態を決め、ステータスドットの色・動きを切り替える
 const STATUS_STATE = {
@@ -60,14 +105,6 @@ async function init() {
 
 headlessToggle.addEventListener("change", () => {
   headless = headlessToggle.checked;
-});
-
-form.querySelector(".presets").addEventListener("click", (event) => {
-  const button = event.target.closest("button");
-  if (!button?.dataset.preset) return;
-  taskInput.value = button.dataset.preset;
-  resetConfirmation();
-  taskInput.focus();
 });
 
 // 指示が変わったら、前の指示への確認は使わない
@@ -124,6 +161,7 @@ form.addEventListener("submit", async (event) => {
 });
 
 async function startRun(task) {
+  saveRecentTask(task);
   taskInput.value = "";
   resetConfirmation();
   run.hidden = false;
@@ -281,4 +319,5 @@ copyBtn.addEventListener("click", async () => {
   }
 });
 
+renderRecentTasks();
 init();

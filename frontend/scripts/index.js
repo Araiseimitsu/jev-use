@@ -15,6 +15,10 @@ const humanCheck = document.querySelector("#human-check");
 const userInput = document.querySelector("#user-input");
 const humanReadyBtn = document.querySelector("#human-ready-btn");
 const preview = document.querySelector("#preview");
+const previewOpen = document.querySelector("#preview-open");
+const previewDialog = document.querySelector("#preview-dialog");
+const previewFull = document.querySelector("#preview-full");
+const previewClose = document.querySelector("#preview-close");
 const steps = document.querySelector("#steps");
 const approval = document.querySelector("#approval");
 const approvalText = document.querySelector("#approval-text");
@@ -167,7 +171,8 @@ async function startRun(task) {
   run.hidden = false;
   result.hidden = true;
   approval.hidden = true;
-  preview.hidden = true;
+  previewOpen.hidden = true;
+  if (previewDialog.open) previewDialog.close();
   steps.replaceChildren();
   pageLine.textContent = "ページを開いています";
   runBtn.disabled = true;
@@ -199,7 +204,8 @@ function onEvent(event) {
     pageLine.textContent = data.title ? `${data.title} — ${data.url}` : data.url || "";
   } else if (event.event === "screenshot" && data.image) {
     preview.src = `data:image/jpeg;base64,${data.image}`;
-    preview.hidden = false;
+    previewFull.src = preview.src;
+    previewOpen.hidden = false;
   } else if (event.event === "step") {
     appendStep(data);
   } else if (event.event === "human_check") {
@@ -220,6 +226,12 @@ function onEvent(event) {
     setStatus("停止");
   }
 }
+
+previewOpen.addEventListener("click", () => previewDialog.showModal());
+previewClose.addEventListener("click", () => previewDialog.close());
+previewDialog.addEventListener("click", (event) => {
+  if (event.target === previewDialog) previewDialog.close();
+});
 
 function showResult(text) {
   result.hidden = false;

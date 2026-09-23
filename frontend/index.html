@@ -59,7 +59,9 @@
         <p id="human-check" class="confirm" hidden></p>
         <p id="user-input" class="confirm" hidden></p>
         <button type="button" id="human-ready-btn" class="quiet" hidden>確認できた</button>
-        <img id="preview" alt="開いているページ" hidden />
+        <button type="button" id="preview-open" aria-label="画像を全画面表示" hidden>
+          <img id="preview" alt="開いているページ" />
+        </button>
         <ol id="steps"></ol>
         <div id="approval" class="approval" hidden>
           <p id="approval-text"></p>
@@ -70,6 +72,11 @@
         </div>
       </section>
     </main>
+
+    <dialog id="preview-dialog" aria-label="画像の全画面表示">
+      <button type="button" id="preview-close" aria-label="閉じる">×</button>
+      <img id="preview-full" alt="開いているページ" />
+    </dialog>
 
     <script type="module" src="/scripts/index.js"></script>
   </body>

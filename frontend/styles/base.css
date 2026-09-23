@@ -170,8 +170,8 @@ body {
 
 /* 本体 */
 main {
-  width: min(640px, calc(100% - 40px));
-  margin: 0 auto 48px;
+  width: min(1440px, calc(100% - 48px));
+  margin: 0 auto 24px;
   animation: rise 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
 
@@ -414,6 +414,18 @@ button:focus-visible {
 /* 実行中表示 */
 #run { margin-top: 24px; }
 
+#preview-open {
+  display: block;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 14px;
+  background: transparent;
+  cursor: zoom-in;
+}
+
+#preview-open[hidden] { display: none; }
+
 #preview {
   display: block;
   width: auto;
@@ -424,8 +436,43 @@ button:focus-visible {
   box-shadow: var(--shadow-card), 0 0 0 1px var(--edge);
 }
 
-/* display: block が hidden を上書きしないよう明示する */
-#preview[hidden] { display: none; }
+#preview-dialog {
+  width: 100vw;
+  max-width: none;
+  height: 100dvh;
+  max-height: none;
+  margin: 0;
+  padding: 24px;
+  border: 0;
+  background: rgba(15, 15, 20, 0.96);
+}
+
+#preview-dialog::backdrop { background: rgba(15, 15, 20, 0.8); }
+
+#preview-full {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+#preview-close {
+  position: absolute;
+  z-index: 1;
+  top: 16px;
+  right: 20px;
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.18);
+  color: white;
+  font-size: 26px;
+  cursor: pointer;
+}
+
+#preview-open:focus-visible,
+#preview-close:focus-visible { outline: 3px solid var(--accent); }
 
 #steps {
   margin: 14px 0 0;
@@ -508,6 +555,47 @@ button:focus-visible {
   font-size: 14.5px;
   line-height: 1.6;
   white-space: pre-wrap;
+}
+
+/* PC では入力と実行状況を横に並べ、増える情報だけ領域内でスクロールする。 */
+@media (min-width: 1000px) {
+  main:has(#run:not([hidden])) {
+    display: grid;
+    grid-template-columns: minmax(320px, 0.85fr) minmax(0, 1.65fr);
+    grid-template-rows: auto auto minmax(0, 1fr);
+    column-gap: 24px;
+    height: calc(100dvh - 84px);
+    min-height: 500px;
+  }
+
+  main:has(#run:not([hidden])) > h1,
+  main:has(#run:not([hidden])) > .lede,
+  main:has(#run:not([hidden])) > #task-form { grid-column: 1; }
+
+  main:has(#run:not([hidden])) > h1 { grid-row: 1; }
+  main:has(#run:not([hidden])) > .lede { grid-row: 2; }
+
+  main:has(#run:not([hidden])) > #task-form {
+    grid-row: 3;
+    align-self: start;
+    max-height: 100%;
+    overflow-y: auto;
+  }
+
+  #run:not([hidden]) {
+    grid-column: 2;
+    grid-row: 1 / 4;
+    min-height: 0;
+    margin-top: 18px;
+    padding: 18px;
+    overflow-y: auto;
+    border: 1px solid var(--edge);
+    border-radius: 20px;
+    background: var(--card);
+    box-shadow: var(--shadow-card);
+  }
+
+  #preview { max-height: min(35vh, 360px); }
 }
 
 /* キーフレーム */

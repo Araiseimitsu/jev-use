@@ -53,12 +53,23 @@ READ_SCRIPT = """
     if (!label) continue;
     const id = 'e' + (out.length + 1);
     el.setAttribute('data-jev-use-id', id);
-    out.push({ id, role, name: label, kind, inputType, autocomplete });
+    const disabled = el.matches(':disabled') || el.getAttribute('aria-disabled') === 'true';
+    const filled = textLike && Boolean(String(el.isContentEditable ? el.textContent : el.value || '').trim());
+    const form = el.form || el.closest('form');
+    const formId = form ? 'f' + (Array.from(document.forms).indexOf(form) + 1) : '';
+    out.push({ id, role, name: label, kind, inputType, autocomplete, disabled, filled, formId });
   }
   return {
     url: location.href,
     title: document.title || '',
     excerpt: (document.body && document.body.innerText || '').replace(/\\s+/g, ' ').trim().slice(0, 1500),
+    feedback: Array.from(document.querySelectorAll(
+      '[role="status"], [role="alert"], [aria-live="polite"], [aria-live="assertive"]'
+    )).filter(el => {
+      const style = getComputedStyle(el);
+      const rect = el.getBoundingClientRect();
+      return rect.width >= 2 && rect.height >= 2 && style.visibility !== 'hidden' && style.display !== 'none';
+    }).map(el => el.innerText || '').join(' ').replace(/\\s+/g, ' ').trim().slice(0, 300),
     elements: out,
   };
 }
@@ -136,6 +147,15 @@ class BrowserSession:
         if submit:
             await locator.press("Enter")
         await self._settle()
+        if not submit:
+            try:
+                actual = await locator.evaluate(
+                    "el => el.isContentEditable ? el.innerText : el.value", timeout=2000
+                )
+            except Exception as e:
+                raise RuntimeError("入力欄の値を確認できませんでした。") from e
+            if actual != text:
+                raise RuntimeError("入力欄に指定した文字列が反映されませんでした。")
 
     async def scroll(self) -> None:
         await self._page.mouse.wheel(0, 900)

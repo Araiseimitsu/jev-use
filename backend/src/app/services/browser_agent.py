@@ -5,6 +5,7 @@
 
 import asyncio
 import logging
+import re
 import sys
 import threading
 import time
@@ -35,6 +36,12 @@ from app.services.page_state import (
 from app.services.text_writer import TextWriter
 
 logger = logging.getLogger(__name__)
+SUBMIT_END = re.compile(
+    r"(?:送信(?:ボタン)?を(?:押す|押して|押してください|クリック(?:する|して|してください)?)"
+    r"|送信(?:する|して|してください)"
+    r"|(?:click|press) (?:the )?(?:send|submit)(?: button)?)[。.!！\s]*$",
+    re.IGNORECASE,
+)
 
 # ページに答えが揃ったとみなす done の確率
 DONE_THRESHOLD = 0.75
@@ -68,6 +75,10 @@ HEADLESS_INPUT_MESSAGE = (
 Emit = Callable[[dict[str, Any] | None], None]
 
 
+class SubmissionNotConfirmed(RuntimeError):
+    """送信後の画面で完了を確認できなかった。"""
+
+
 class BrowserAgentRunner:
     """ブラウザを開き、操作候補の選択と実行を繰り返す。"""
 
@@ -96,6 +107,13 @@ class BrowserAgentRunner:
         self._repeat = 0
         self._assist_count = 0
         self._skip_login_url = ""
+        self._typed_fields: set[tuple[str, str, str]] = set()
+        submit_instruction = SUBMIT_END.search(self.task)
+        prefix = self.task[:submit_instruction.start()].rstrip().casefold() if submit_instruction else ""
+        self._ends_with_submit = bool(
+            submit_instruction and not prefix.endswith(("do not", "don't", "never", "without"))
+        )
+        self._submit_waits = 0
 
     def task_for_model(self) -> str:
         """判断と文章生成に渡す指示。パスワードの実値は含めない。"""
@@ -201,6 +219,8 @@ class BrowserAgentRunner:
                     },
                 }
             )
+        except SubmissionNotConfirmed as e:
+            emit({"event": "error", "data": {"message": str(e)}})
         except Exception as e:
             logger.exception("browser agent failed")
             emit({"event": "error", "data": {"message": _public_error(e)}})
@@ -228,9 +248,35 @@ class BrowserAgentRunner:
                 return handed, step
             view = handed
 
-            ranked = rank_elements(view.elements, self.task)
+            # 入力済みの同じ欄を Jev が再選択しても、次の操作へ進めるようにする。
+            for element in view.elements:
+                if element.kind == "type" and not element.filled:
+                    self._typed_fields.discard((view.url, element.form_id, element.name))
+            available = tuple(
+                element for element in view.elements
+                if not (element.kind == "type" and element.filled
+                        and (view.url, element.form_id, element.name) in self._typed_fields)
+            )
+            ranked = rank_elements(available, self.task)
             options = action_catalog(ranked, defer_login=needs_user_input(view))
-            decision = await self.decider.decide(self.task_for_model(), view, options)
+            buttons = self._submit_buttons(view)
+            if len(buttons) == 1 and buttons[0].disabled:
+                if self._submit_waits >= 3 or step == self.max_steps:
+                    raise SubmissionNotConfirmed(
+                        "入力後も送信ボタンが有効にならなかったため、送信していません。"
+                    )
+                self._submit_waits += 1
+                await session.wait()
+                continue
+            submit = self._submit_after_input(view, ranked)
+            decision = submit[0] if submit else await self.decider.decide(self.task_for_model(), view, options)
+            if submit is None and self._ends_with_submit:
+                selected = next(
+                    (element for element in ranked if decision.action_id == f"click:{element.id}"),
+                    None,
+                )
+                if selected is not None and self._is_send_button(selected):
+                    submit = (decision, selected.form_id)
             if decision.used_fallback:
                 reason = await self._hand_off_or_stop(
                     emit,
@@ -263,12 +309,101 @@ class BrowserAgentRunner:
                 continue
 
             typed, error = await self._perform(session, decision.action_id, ranked, client, view.title)
+            if typed and not error and decision.action_id.startswith("type:"):
+                field = next(
+                    (element for element in ranked if decision.action_id == f"type:{element.id}"), None
+                )
+                if field is not None:
+                    self._typed_fields.add((view.url, field.form_id, field.name))
             self._emit_step(emit, step, decision, options, typed, error)
+            if submit is not None:
+                if error:
+                    raise SubmissionNotConfirmed(
+                        "送信操作でエラーが発生し、完了を確認できませんでした。自動再送信はしていません。"
+                    )
+                return await self._verify_submission(emit, session, view, submit[1], step), step
 
         summary = await self.writer.summary(
             client, self.task_for_model(), view.url, view.title, view.excerpt
         )
         return f"最大ステップ数（{self.max_steps}）に達しました。\n{summary}", step
+
+    def _submit_after_input(
+        self, view: PageView, elements: tuple[Element, ...]
+    ) -> tuple[Decision, str] | None:
+        """明示された送信ボタンが入力済みの同じフォームにあれば次に押す。"""
+        candidates = [element for element in self._submit_buttons(view) if element in elements]
+        if len(candidates) != 1:
+            return None
+        button = candidates[0]
+        return (
+            Decision(
+                action_id=f"click:{button.id}",
+                confidence=1.0,
+                risk_probability=1.0,
+                model="form-submit",
+            ),
+            button.form_id,
+        )
+
+    def _submit_buttons(self, view: PageView) -> list[Element]:
+        """入力済みの欄と対応し、依頼に明示された送信ボタンを探す。"""
+        if not self._ends_with_submit:
+            return []
+        typed = [
+            element for element in view.elements
+            if element.kind == "type" and element.filled
+            and (view.url, element.form_id, element.name) in self._typed_fields
+        ]
+        forms = {element.form_id for element in typed}
+        if len(forms) != 1:
+            return []
+        form_id = forms.pop()
+        return [
+            element for element in view.elements
+            if self._is_send_button(element)
+            and element.form_id == form_id
+        ]
+
+    def _is_send_button(self, element: Element) -> bool:
+        name = element.name.casefold()
+        return (
+            element.kind == "click"
+            and (element.role == "button" or element.input_type == "submit")
+            and any(word in name for word in ("送信", "send", "submit"))
+            and name in self.task.casefold()
+        )
+
+    async def _verify_submission(
+        self, emit: Emit, session: Any, before: PageView, form_id: str, step: int
+    ) -> str:
+        """クリック後の画面を確認する。判断できない送信は押し直さない。"""
+        filled_names = {
+            element.name for element in before.elements
+            if element.kind == "type" and element.form_id == form_id and element.filled
+        }
+        cleared = False
+        for _ in range(3):
+            await session.wait()
+            after = await session.read()
+            self._emit_observation(emit, step, after)
+            feedback = after.feedback if after.feedback != before.feedback else ""
+            if re.search(r"送信.{0,12}(?:失敗|できません|エラー)|failed to send|send failed", feedback, re.IGNORECASE):
+                raise SubmissionNotConfirmed("画面に送信失敗が表示されました。自動再送信はしていません。")
+            if re.search(r"送信(?:しました|完了|済み)|message sent|sent successfully", feedback, re.IGNORECASE):
+                return "画面に送信完了が表示されました。"
+            if after.url != before.url:
+                return "送信ボタンを押し、ページが移動したことを確認しました。"
+            cleared = any(
+                element.kind == "type" and element.form_id == form_id
+                and element.name in filled_names and not element.filled
+                for element in after.elements
+            )
+        if cleared:
+            return "送信ボタンを押し、入力欄がクリアされたことを確認しました。"
+        raise SubmissionNotConfirmed(
+            "送信ボタンを押しましたが、完了を確認できませんでした。自動再送信はしていません。"
+        )
 
     async def _hold_for_human(
         self, emit: Emit, session: Any, view: PageView, step: int

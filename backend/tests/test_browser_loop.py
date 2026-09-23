@@ -2,6 +2,8 @@
 
 import asyncio
 
+import pytest
+
 from app.core.config import settings
 from app.services.browser_agent import BrowserAgentRunner
 from app.services.jev.browser_decider import Decision
@@ -126,6 +128,18 @@ def _events(runner: BrowserAgentRunner) -> list[dict]:
     return asyncio.run(collect())
 
 
+def _approved_events(runner: BrowserAgentRunner) -> list[dict]:
+    async def collect() -> list[dict]:
+        found = []
+        async for event in runner.run_stream():
+            found.append(event)
+            if event["event"] == "confirm_request":
+                runner.resolve_approval(True)
+        return found
+
+    return asyncio.run(collect())
+
+
 def test_human_check_waits_until_the_person_finishes(monkeypatch) -> None:
     monkeypatch.setattr(settings, "human_check_timeout_seconds", 5)
     challenge = PageView("https://www.google.com/sorry/index", "あなたは人間ですか？", "私はロボットではありません", ())
@@ -157,6 +171,267 @@ def test_type_action_fills_the_field_and_submits_search() -> None:
     _events(_runner(session, [_decision("type:e1"), _decision("done", done=0.9)]))
 
     assert session.actions[0] == ("fill", "e1", "東京 天気", True)
+
+
+def test_message_is_typed_before_send_becomes_an_option() -> None:
+    class ChatSession(FakeSession):
+        async def fill(self, element_id: str, text: str, submit: bool) -> None:
+            await super().fill(element_id, text, submit)
+            self.view = PageView(
+                self.view.url,
+                self.view.title,
+                self.view.excerpt,
+                (
+                    Element("e1", "textarea", "メッセージ", "type", filled=True, form_id="f1"),
+                    Element("e2", "button", "送信", "click", input_type="submit", form_id="f1"),
+                ),
+            )
+
+        async def click(self, element_id: str) -> None:
+            await super().click(element_id)
+            self.view = PageView(
+                self.view.url,
+                self.view.title,
+                self.view.excerpt,
+                (
+                    Element("e1", "textarea", "メッセージ", "type", form_id="f1"),
+                    Element("e2", "button", "送信", "click", input_type="submit", disabled=True, form_id="f1"),
+                ),
+            )
+
+    class ChatDecider:
+        enabled = True
+
+        async def decide(self, task: str, view: PageView, options: tuple) -> Decision:
+            ids = {option.id for option in options}
+            if "type:e1" in ids:
+                return _decision("type:e1")
+            assert "click:e2" in ids
+            return _decision("scroll_down")
+
+    session = ChatSession(
+        PageView(
+            "https://example.com/chat",
+            "会話",
+            "",
+            (
+                Element("e1", "textarea", "メッセージ", "type", form_id="f1"),
+                Element("e2", "button", "送信", "click", input_type="submit", disabled=True, form_id="f1"),
+            ),
+        )
+    )
+    runner = BrowserAgentRunner(
+        task="https://example.com/chat でhelloと入力し、送信ボタンを押す",
+        max_steps=4,
+        headless=True,
+        decider=ChatDecider(),  # type: ignore[arg-type]
+        writer=FakeWriter(phrase="hello"),  # type: ignore[arg-type]
+        session_factory=lambda: session,
+    )
+
+    events = _approved_events(runner)
+
+    assert [action for action in session.actions if action[0] != "wait"] == [
+        ("fill", "e1", "hello", False), ("click", "e2")
+    ]
+    assert session.reads >= 3
+    assert any(event["event"] == "confirm_request" for event in events)
+    assert not any(event["event"] == "user_input" for event in events)
+    assert "入力欄がクリア" in events[-1]["data"]["result"]
+
+
+def test_submit_follow_up_requires_matching_form_and_explicit_button_name() -> None:
+    runner = BrowserAgentRunner(task="メッセージを入力して送信ボタンを押す")
+    runner._typed_fields.add(("https://example.com/chat", "f1", "メッセージ"))
+    view = PageView(
+        "https://example.com/chat", "会話", "",
+        (
+            Element("e0", "textarea", "メッセージ", "type", filled=True, form_id="f1"),
+            Element("e1", "button", "送信", "click", input_type="submit", form_id="f2"),
+            Element("e2", "button", "削除", "click", input_type="submit", form_id="f1"),
+        ),
+    )
+    other_form = Element("e1", "button", "送信", "click", input_type="submit", form_id="f2")
+    other_button = Element("e2", "button", "削除", "click", input_type="submit", form_id="f1")
+
+    assert runner._submit_after_input(view, (other_form, other_button)) is None
+    not_requested = BrowserAgentRunner(task="メッセージを入力する。送信ボタンは押さない")
+    not_requested._typed_fields.add((view.url, "f1", "メッセージ"))
+    send = Element("e3", "button", "送信", "click", input_type="submit", form_id="f1")
+    assert not_requested._submit_after_input(view, (send,)) is None
+    english_negative = BrowserAgentRunner(task="Type hello, but do not click Send")
+    english_negative._typed_fields.add((view.url, "f1", "メッセージ"))
+    english_send_view = PageView(view.url, view.title, "", (
+        Element("e0", "textarea", "メッセージ", "type", filled=True, form_id="f1"),
+        Element("e3", "button", "Send", "click", form_id="f1"),
+    ))
+    assert english_negative._submit_after_input(english_send_view, english_send_view.elements) is None
+    unformed = BrowserAgentRunner(task="helloを入力して送信ボタンを押す")
+    unformed._typed_fields.add((view.url, "", "メッセージ"))
+    no_form_view = PageView(
+        view.url, view.title, "",
+        (
+            Element("e4", "textbox", "メッセージ", "type", filled=True),
+            Element("e5", "button", "送信", "click", input_type="button"),
+        ),
+    )
+    button = Element("e5", "button", "送信", "click", input_type="button")
+    assert unformed._submit_after_input(no_form_view, (button,)) is not None
+
+
+def test_submit_waits_for_button_to_become_enabled() -> None:
+    class DelayedChat(FakeSession):
+        async def fill(self, element_id: str, text: str, submit: bool) -> None:
+            await super().fill(element_id, text, submit)
+            self.view = PageView(self.view.url, self.view.title, "", (
+                Element("e1", "textarea", "メッセージ", "type", filled=True, form_id="f1"),
+                Element("e2", "button", "送信", "click", input_type="submit", disabled=True, form_id="f1"),
+            ))
+
+        async def wait(self) -> None:
+            await super().wait()
+            if any(action[0] == "click" for action in self.actions):
+                return
+            self.view = PageView(self.view.url, self.view.title, "", (
+                Element("e1", "textarea", "メッセージ", "type", filled=True, form_id="f1"),
+                Element("e2", "button", "送信", "click", input_type="submit", form_id="f1"),
+            ))
+
+        async def click(self, element_id: str) -> None:
+            await super().click(element_id)
+            self.view = PageView(self.view.url, self.view.title, "", (
+                Element("e1", "textarea", "メッセージ", "type", form_id="f1"),
+                Element("e2", "button", "送信", "click", input_type="submit", disabled=True, form_id="f1"),
+            ))
+
+    session = DelayedChat(PageView("https://example.com/chat", "会話", "", (
+        Element("e1", "textarea", "メッセージ", "type", form_id="f1"),
+        Element("e2", "button", "送信", "click", input_type="submit", disabled=True, form_id="f1"),
+    )))
+    runner = BrowserAgentRunner(
+        task="https://example.com/chat でhelloと入力し、送信ボタンを押す",
+        max_steps=5,
+        headless=True,
+        decider=ScriptedDecider([_decision("type:e1"), _decision("scroll_down")]),  # type: ignore[arg-type]
+        writer=FakeWriter(phrase="hello"),  # type: ignore[arg-type]
+        session_factory=lambda: session,
+    )
+
+    events = _approved_events(runner)
+
+    assert [action[0] for action in session.actions[:3]] == ["fill", "wait", "click"]
+    assert "入力欄がクリア" in events[-1]["data"]["result"]
+
+
+def test_submit_without_visible_change_is_not_retried() -> None:
+    class UnchangedChat(FakeSession):
+        async def fill(self, element_id: str, text: str, submit: bool) -> None:
+            await super().fill(element_id, text, submit)
+            self.view = PageView(
+                self.view.url, self.view.title, self.view.excerpt,
+                (
+                    Element("e1", "textarea", "メッセージ", "type", filled=True, form_id="f1"),
+                    Element("e2", "button", "送信", "click", input_type="submit", form_id="f1"),
+                ),
+            )
+
+    session = UnchangedChat(PageView(
+        "https://example.com/chat", "会話", "",
+        (
+            Element("e1", "textarea", "メッセージ", "type", form_id="f1"),
+            Element("e2", "button", "送信", "click", input_type="submit", disabled=True, form_id="f1"),
+        ),
+    ))
+    runner = BrowserAgentRunner(
+        task="https://example.com/chat でhelloと入力し、送信ボタンを押す",
+        max_steps=5,
+        headless=True,
+        decider=ScriptedDecider([_decision("type:e1"), _decision("scroll_down")]),  # type: ignore[arg-type]
+        writer=FakeWriter(phrase="hello"),  # type: ignore[arg-type]
+        session_factory=lambda: session,
+    )
+
+    events = _approved_events(runner)
+
+    assert session.actions.count(("click", "e2")) == 1
+    assert events[-1]["event"] == "error"
+    assert "確認できません" in events[-1]["data"]["message"]
+
+
+def test_submit_click_error_is_not_retried() -> None:
+    class ClickErrorChat(FakeSession):
+        async def fill(self, element_id: str, text: str, submit: bool) -> None:
+            await super().fill(element_id, text, submit)
+            self.view = PageView(self.view.url, self.view.title, "", (
+                Element("e1", "textarea", "メッセージ", "type", filled=True, form_id="f1"),
+                Element("e2", "button", "送信", "click", input_type="submit", form_id="f1"),
+            ))
+
+        async def click(self, element_id: str) -> None:
+            await super().click(element_id)
+            raise RuntimeError("click timed out")
+
+    session = ClickErrorChat(PageView("https://example.com/chat", "会話", "", (
+        Element("e1", "textarea", "メッセージ", "type", form_id="f1"),
+        Element("e2", "button", "送信", "click", input_type="submit", disabled=True, form_id="f1"),
+    )))
+    runner = BrowserAgentRunner(
+        task="https://example.com/chat でhelloと入力し、送信ボタンを押してください",
+        max_steps=5,
+        headless=True,
+        decider=ScriptedDecider([_decision("type:e1")]),  # type: ignore[arg-type]
+        writer=FakeWriter(phrase="hello"),  # type: ignore[arg-type]
+        session_factory=lambda: session,
+    )
+
+    events = _approved_events(runner)
+
+    assert session.actions.count(("click", "e2")) == 1
+    assert events[-1]["event"] == "error"
+    assert "自動再送信はしていません" in events[-1]["data"]["message"]
+
+
+def test_post_submit_error_takes_precedence_over_cleared_input() -> None:
+    before = PageView("https://example.com/chat", "会話", "", (
+        Element("e1", "textarea", "メッセージ", "type", filled=True, form_id="f1"),
+    ))
+    after = PageView("https://example.com/chat", "会話", "", (
+        Element("e1", "textarea", "メッセージ", "type", form_id="f1"),
+    ), feedback="送信に失敗しました")
+    session = FakeSession(after)
+    runner = BrowserAgentRunner(task="送信ボタンを押す")
+
+    with pytest.raises(RuntimeError, match="送信失敗"):
+        asyncio.run(runner._verify_submission(lambda event: None, session, before, "f1", 1))
+
+
+def test_jev_selected_send_on_prefilled_form_is_verified() -> None:
+    class PrefilledChat(FakeSession):
+        async def click(self, element_id: str) -> None:
+            await super().click(element_id)
+            self.view = PageView(self.view.url, self.view.title, "", (
+                Element("e1", "textarea", "メッセージ", "type", form_id="f1"),
+                Element("e2", "button", "送信", "click", input_type="submit", disabled=True, form_id="f1"),
+            ))
+
+    session = PrefilledChat(PageView("https://example.com/chat", "会話", "", (
+        Element("e1", "textarea", "メッセージ", "type", filled=True, form_id="f1"),
+        Element("e2", "button", "送信", "click", input_type="submit", form_id="f1"),
+    )))
+    runner = BrowserAgentRunner(
+        task="https://example.com/chat で送信ボタンを押す",
+        max_steps=3,
+        headless=True,
+        decider=ScriptedDecider([_decision("click:e2")]),  # type: ignore[arg-type]
+        writer=FakeWriter(),  # type: ignore[arg-type]
+        session_factory=lambda: session,
+    )
+
+    events = _events(runner)
+
+    assert session.actions.count(("click", "e2")) == 1
+    assert session.reads >= 2
+    assert "入力欄がクリア" in events[-1]["data"]["result"]
 
 
 def _login_view() -> PageView:

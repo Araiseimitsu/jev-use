@@ -9,6 +9,7 @@ from app.services.page_state import (
     is_allowed_url,
     is_human_check,
     needs_user_input,
+    page_view_from_raw,
     rank_elements,
     redact_secrets,
     request_line,
@@ -67,6 +68,34 @@ def test_catalog_uses_element_ids_and_control_actions() -> None:
 
     assert ids == ["click:e1", "scroll_down", "back", "wait", "done"]
     assert all("x" not in option.id for option in catalog)
+
+
+def test_disabled_send_is_not_offered_until_enabled() -> None:
+    raw = [
+        {"id": "e1", "role": "textarea", "name": "メッセージ", "kind": "type"},
+        {"id": "e2", "role": "button", "name": "送信", "kind": "click", "disabled": True},
+    ]
+    task = "会話ページでhelloと入力し、送信ボタンを押す"
+
+    before = action_catalog(rank_elements(elements_from_raw(raw), task))
+    raw[1]["disabled"] = False
+    after = action_catalog(rank_elements(elements_from_raw(raw), task))
+
+    assert "type:e1" in {option.id for option in before}
+    assert "click:e2" not in {option.id for option in before}
+    assert "click:e2" in {option.id for option in after}
+
+
+def test_status_feedback_is_available_for_post_submit_check() -> None:
+    view = page_view_from_raw({
+        "url": "https://example.com/chat",
+        "title": "会話",
+        "excerpt": "会話画面",
+        "feedback": "送信に失敗しました",
+        "elements": [],
+    })
+
+    assert view.feedback == "送信に失敗しました"
 
 
 def test_search_field_submits_on_enter() -> None:

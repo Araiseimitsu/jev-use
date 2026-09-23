@@ -57,8 +57,11 @@ class Element:
     kind: str
     input_type: str = ""
     autocomplete: str = ""
+    disabled: bool = False
+    filled: bool = False
+    form_id: str = ""
 
-    def to_dict(self) -> dict[str, str]:
+    def to_dict(self) -> dict[str, str | bool]:
         return asdict(self)
 
 
@@ -70,6 +73,7 @@ class PageView:
     title: str
     excerpt: str
     elements: tuple[Element, ...]
+    feedback: str = ""
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -132,7 +136,10 @@ def elements_from_raw(raw: object) -> tuple[Element, ...]:
         role = str(item.get("role", "")).strip() or kind
         input_type = str(item.get("inputType") or item.get("input_type") or "").strip()
         autocomplete = str(item.get("autocomplete") or "").strip()
-        elements.append(Element(element_id, role, name, kind, input_type, autocomplete))
+        disabled = item.get("disabled") is True
+        filled = item.get("filled") is True
+        form_id = str(item.get("formId") or "")
+        elements.append(Element(element_id, role, name, kind, input_type, autocomplete, disabled, filled, form_id))
     return tuple(elements)
 
 
@@ -145,6 +152,7 @@ def page_view_from_raw(raw: object) -> PageView:
         title=str(data.get("title", "")),
         excerpt=excerpt[:1500],
         elements=elements_from_raw(data.get("elements")),
+        feedback=str(data.get("feedback", ""))[:300],
     )
 
 
@@ -155,6 +163,8 @@ def rank_elements(
     folded = task.casefold()
     scored: list[tuple[int, int, Element]] = []
     for index, element in enumerate(elements):
+        if element.disabled:
+            continue
         name = element.name.casefold()
         score = 3 if element.kind == "type" else 0
         if name and name in folded:
@@ -190,6 +200,8 @@ def action_catalog(
     """要素と、いつでも選べる制御操作を候補にする。"""
     options: list[ActionOption] = []
     for element in elements:
+        if element.disabled:
+            continue
         if element.kind == "type":
             if _leave_to_user(element, defer_login):
                 continue

@@ -39,6 +39,7 @@ logger = logging.getLogger(__name__)
 SUBMIT_END = re.compile(
     r"(?:送信(?:ボタン)?を(?:押す|押して|押してください|クリック(?:する|して|してください)?)"
     r"|送信(?:する|して|してください)"
+    r"|送って(?:ください)?|投稿(?:する|して|してください)"
     r"|(?:click|press) (?:the )?(?:send|submit)(?: button)?)[。.!！\s]*$",
     re.IGNORECASE,
 )
@@ -48,7 +49,7 @@ DONE_THRESHOLD = 0.75
 # 同じ操作が続いたら止める回数
 REPEAT_LIMIT = 3
 # 確認なしで実行してよい操作
-SAFE_ACTIONS = frozenset({"scroll_down", "back", "wait", "done"})
+SAFE_ACTIONS = frozenset({"back", "wait", "done"})
 # 「人間ですか？」の画面を見にいく間隔（秒）
 HUMAN_CHECK_POLL_SECONDS = 1.0
 HUMAN_CHECK_MESSAGE = (
@@ -257,7 +258,7 @@ class BrowserAgentRunner:
                 if not (element.kind == "type" and element.filled
                         and (view.url, element.form_id, element.name) in self._typed_fields)
             )
-            ranked = rank_elements(available, self.task)
+            ranked = rank_elements(available, self.task, prefer=self._submit_targets(view))
             options = action_catalog(ranked, defer_login=needs_user_input(view))
             buttons = self._submit_buttons(view)
             if len(buttons) == 1 and buttons[0].disabled:
@@ -268,15 +269,13 @@ class BrowserAgentRunner:
                 self._submit_waits += 1
                 await session.wait()
                 continue
-            submit = self._submit_after_input(view, ranked)
+            submit = self._submit_after_input(view)
             decision = submit[0] if submit else await self.decider.decide(self.task_for_model(), view, options)
             if submit is None and self._ends_with_submit:
-                selected = next(
-                    (element for element in ranked if decision.action_id == f"click:{element.id}"),
-                    None,
-                )
-                if selected is not None and self._is_send_button(selected):
-                    submit = (decision, selected.form_id)
+                # Jev が自分で送信ボタンを選んだときも、押した後の確認を同じように行う。
+                sent_to = _clicked_id(decision.action_id)
+                if sent_to and sent_to in self._submit_targets(view, typed_only=False):
+                    submit = (decision, sent_to)
             if decision.used_fallback:
                 reason = await self._hand_off_or_stop(
                     emit,
@@ -308,10 +307,10 @@ class BrowserAgentRunner:
                     return reason, step
                 continue
 
-            typed, error = await self._perform(session, decision.action_id, ranked, client, view.title)
+            typed, error = await self._perform(session, decision.action_id, view.elements, client, view.title)
             if typed and not error and decision.action_id.startswith("type:"):
                 field = next(
-                    (element for element in ranked if decision.action_id == f"type:{element.id}"), None
+                    (element for element in view.elements if decision.action_id == f"type:{element.id}"), None
                 )
                 if field is not None:
                     self._typed_fields.add((view.url, field.form_id, field.name))
@@ -328,11 +327,9 @@ class BrowserAgentRunner:
         )
         return f"最大ステップ数（{self.max_steps}）に達しました。\n{summary}", step
 
-    def _submit_after_input(
-        self, view: PageView, elements: tuple[Element, ...]
-    ) -> tuple[Decision, str] | None:
-        """明示された送信ボタンが入力済みの同じフォームにあれば次に押す。"""
-        candidates = [element for element in self._submit_buttons(view) if element in elements]
+    def _submit_after_input(self, view: PageView) -> tuple[Decision, str] | None:
+        """送信が依頼されていて、入力した欄の送信ボタンが押せる状態なら次に押す。"""
+        candidates = [element for element in self._submit_buttons(view) if not element.disabled]
         if len(candidates) != 1:
             return None
         button = candidates[0]
@@ -343,44 +340,36 @@ class BrowserAgentRunner:
                 risk_probability=1.0,
                 model="form-submit",
             ),
-            button.form_id,
+            button.id,
         )
 
     def _submit_buttons(self, view: PageView) -> list[Element]:
-        """入力済みの欄と対応し、依頼に明示された送信ボタンを探す。"""
+        """送信が依頼されていれば、入力した欄に対応する送信ボタンを返す。対応先が 1 つに決まらなければ空。"""
         if not self._ends_with_submit:
             return []
-        typed = [
-            element for element in view.elements
-            if element.kind == "type" and element.filled
-            and (view.url, element.form_id, element.name) in self._typed_fields
-        ]
-        forms = {element.form_id for element in typed}
-        if len(forms) != 1:
+        targets = self._submit_targets(view)
+        if len(targets) != 1:
             return []
-        form_id = forms.pop()
-        return [
-            element for element in view.elements
-            if self._is_send_button(element)
-            and element.form_id == form_id
-        ]
+        return [element for element in view.elements if element.id in targets and element.kind == "click"]
 
-    def _is_send_button(self, element: Element) -> bool:
-        name = element.name.casefold()
-        return (
-            element.kind == "click"
-            and (element.role == "button" or element.input_type == "submit")
-            and any(word in name for word in ("送信", "send", "submit"))
-            and name in self.task.casefold()
+    def _submit_targets(self, view: PageView, *, typed_only: bool = True) -> frozenset[str]:
+        """入力済みの欄の送信ボタンの id。ボタンはページの構造から決まり、文言には依らない。
+
+        typed_only のときは、このタスクで自分が入力した欄だけを見る。
+        """
+        return frozenset(
+            element.submit_id for element in view.elements
+            if element.kind == "type" and element.filled and element.submit_id
+            and (not typed_only or (view.url, element.form_id, element.name) in self._typed_fields)
         )
 
     async def _verify_submission(
-        self, emit: Emit, session: Any, before: PageView, form_id: str, step: int
+        self, emit: Emit, session: Any, before: PageView, button_id: str, step: int
     ) -> str:
         """クリック後の画面を確認する。判断できない送信は押し直さない。"""
-        filled_names = {
-            element.name for element in before.elements
-            if element.kind == "type" and element.form_id == form_id and element.filled
+        fields = {
+            (element.form_id, element.name) for element in before.elements
+            if element.kind == "type" and element.submit_id == button_id and element.filled
         }
         cleared = False
         for _ in range(3):
@@ -395,8 +384,7 @@ class BrowserAgentRunner:
             if after.url != before.url:
                 return "送信ボタンを押し、ページが移動したことを確認しました。"
             cleared = any(
-                element.kind == "type" and element.form_id == form_id
-                and element.name in filled_names and not element.filled
+                element.kind == "type" and (element.form_id, element.name) in fields and not element.filled
                 for element in after.elements
             )
         if cleared:
@@ -604,9 +592,6 @@ class BrowserAgentRunner:
         client: httpx.AsyncClient,
         page_title: str,
     ) -> str:
-        if action_id == "scroll_down":
-            await session.scroll()
-            return ""
         if action_id == "back":
             await session.back()
             return ""
@@ -678,6 +663,12 @@ def _public_error(exc: Exception) -> str:
     if _browser_closed(exc):
         return "ブラウザが閉じられたため停止しました。"
     return f"実行中にエラーが発生しました: {exc}"
+
+
+def _clicked_id(action_id: str) -> str:
+    """click:e3 のような操作から要素の id を取り出す。クリック以外は空。"""
+    kind, _, element_id = action_id.partition(":")
+    return element_id if kind == "click" else ""
 
 
 def _description(options: tuple[ActionOption, ...], action_id: str) -> str:

@@ -12,65 +12,186 @@ from app.services.page_state import PageView, page_view_from_raw
 
 logger = logging.getLogger(__name__)
 
-# 画面上の操作できる要素を id 付きで返す。パスワード欄も見つけ、入力は人が行う。
-READ_SCRIPT = """
+# 打ち直すときの 1 文字ごとの間隔（ミリ秒）
+TYPE_DELAY_MS = 20
+
+# ページ全体の操作できる要素を id 付きで返す。パスワード欄も見つけ、入力は人が行う。
+# 画面外の要素も読む。クリックと入力は Playwright が要素まで自動でスクロールする。
+# 上限を超えたときは 入力欄 → ボタン類 → リンク の順に残し、出力はページ上の順に戻す。
+READ_SCRIPT = r"""
 () => {
+  const MAX_ELEMENTS = 150;
+  // 送信ボタンを探して入力欄から遡る祖先の段数
+  const MAX_SUBMIT_DEPTH = 8;
   const selector = [
     'a[href]', 'button', 'input:not([type=hidden])', 'textarea', 'select',
     '[role="button"]', '[role="link"]', '[role="textbox"]', '[role="searchbox"]',
-    '[role="tab"]', '[role="menuitem"]', '[contenteditable="true"]'
+    '[role="tab"]', '[role="menuitem"]', '[contenteditable]:not([contenteditable="false"])'
   ].join(',');
   const skipType = new Set(['hidden', 'file']);
-  const out = [];
-  for (const el of document.querySelectorAll(selector)) {
-    if (out.length >= 40) break;
-    const style = getComputedStyle(el);
-    const rect = el.getBoundingClientRect();
-    if (rect.width < 2 || rect.height < 2) continue;
-    if (style.visibility === 'hidden' || style.display === 'none') continue;
-    const tag = el.tagName.toLowerCase();
-    const inputType = (el.getAttribute('type') || '').toLowerCase();
-    if (skipType.has(inputType)) continue;
-    const role = el.getAttribute('role') || (
-      tag === 'a' ? 'link' : tag === 'button' ? 'button' : tag === 'select' ? 'combobox' : tag
-    );
-    const textLike = tag === 'textarea' || el.isContentEditable || role === 'textbox' || role === 'searchbox'
-      || (tag === 'input' && ['', 'text', 'search', 'email', 'url', 'tel', 'number', 'password'].includes(inputType));
-    const kind = textLike ? 'type' : 'click';
-    const labelled = (el.labels && el.labels.length)
-      ? Array.from(el.labels).map(node => node.innerText).join(' ')
-      : '';
-    const name = (
-      el.getAttribute('aria-label') || el.getAttribute('placeholder') || labelled || el.innerText
-      || el.getAttribute('title') || el.getAttribute('name') || ''
-    ).replace(/\\s+/g, ' ').trim().slice(0, 80);
-    const autocomplete = (el.getAttribute('autocomplete') || '').toLowerCase();
-    const label = name || (
-      inputType === 'password' || autocomplete.includes('password') ? 'パスワード'
-      : autocomplete === 'username' || autocomplete === 'email' ? 'ユーザー名'
-      : kind === 'type' ? '入力欄' : ''
-    );
-    if (!label) continue;
-    const id = 'e' + (out.length + 1);
-    el.setAttribute('data-jev-use-id', id);
-    const disabled = el.matches(':disabled') || el.getAttribute('aria-disabled') === 'true';
-    const filled = textLike && Boolean(String(el.isContentEditable ? el.textContent : el.value || '').trim());
-    const form = el.form || el.closest('form');
-    const formId = form ? 'f' + (Array.from(document.forms).indexOf(form) + 1) : '';
-    out.push({ id, role, name: label, kind, inputType, autocomplete, disabled, filled, formId });
+  const textTypes = ['', 'text', 'search', 'email', 'url', 'tel', 'number', 'password'];
+  const buttonTypes = ['submit', 'button', 'image', 'reset'];
+  const searchName = /^(q|query|search|keywords?)$/i;
+  const sendName = /送信|送る|投稿|検索|\b(send|submit|post|search)\b/i;
+  const EXCERPT_LIMIT = 1500;
+  // 長い本文は先頭と末尾を残す。チャットの最新の回答や送信結果は末尾に出る。
+  const EXCERPT_HEAD = 600;
+  const clean = text => String(text || '').replace(/\s+/g, ' ').trim();
+  const clip = (text, limit) => text.length <= limit
+    ? text
+    : text.slice(0, EXCERPT_HEAD) + ' … ' + text.slice(text.length - (limit - EXCERPT_HEAD - 3));
+  // 本文は main があればそこから読む。サイドバーの履歴などで本文の枠が埋まるのを避ける。
+  const pageText = () => {
+    const main = document.querySelector('main, [role="main"]');
+    return (main && clean(main.innerText)) || clean(document.body && document.body.innerText);
+  };
+
+  // open な shadow DOM の中も読む。Playwright のロケーターも中まで届く。
+  const roots = [document];
+  for (let i = 0; i < roots.length; i++) {
+    for (const el of roots[i].querySelectorAll('*')) {
+      if (el.shadowRoot) roots.push(el.shadowRoot);
+    }
   }
+  // 前回の id を消す。残すと別の要素と同じ id になり、操作先が二つになる。
+  for (const root of roots) {
+    for (const el of root.querySelectorAll('[data-jev-use-id]')) el.removeAttribute('data-jev-use-id');
+  }
+
+  const visible = el => {
+    const rect = el.getBoundingClientRect();
+    if (rect.width < 2 || rect.height < 2) return false;
+    if (el.closest('[aria-hidden="true"], [inert]')) return false;
+    if (el.checkVisibility) return el.checkVisibility({ visibilityProperty: true });
+    const style = getComputedStyle(el);
+    return style.visibility !== 'hidden' && style.display !== 'none';
+  };
+  const labelledBy = el => {
+    const root = el.getRootNode();
+    return (el.getAttribute('aria-labelledby') || '').split(/\s+/)
+      .map(id => (id && root.getElementById ? root.getElementById(id) : null))
+      .filter(Boolean).map(node => node.innerText || node.textContent).join(' ');
+  };
+
+  const seenLinks = new Set();
+  const found = [];
+  let order = 0;
+  for (const root of roots) {
+    for (const el of root.querySelectorAll(selector)) {
+      order += 1;
+      if (!visible(el)) continue;
+      const tag = el.tagName.toLowerCase();
+      const inputType = (el.getAttribute('type') || '').toLowerCase();
+      if (skipType.has(inputType)) continue;
+      const explicitRole = el.getAttribute('role') || '';
+      const textLike = tag === 'textarea' || el.isContentEditable
+        || explicitRole === 'textbox' || explicitRole === 'searchbox'
+        || (tag === 'input' && textTypes.includes(inputType));
+      const role = explicitRole || (
+        tag === 'a' ? 'link' : tag === 'button' ? 'button' : tag === 'select' ? 'combobox'
+        : el.isContentEditable ? 'textbox' : tag
+      );
+      const kind = textLike ? 'type' : 'click';
+      const labelled = (el.labels && el.labels.length)
+        ? Array.from(el.labels).map(node => node.innerText).join(' ')
+        : '';
+      // 入力欄の innerText は入力済みの中身なので名前に使わない。
+      const inner = textLike ? '' : el.innerText;
+      const image = el.querySelector('img[alt]');
+      const buttonValue = tag === 'input' && buttonTypes.includes(inputType) ? el.value : '';
+      const name = clean(
+        el.getAttribute('aria-label') || labelledBy(el) || el.getAttribute('placeholder')
+        || el.getAttribute('aria-placeholder') || el.getAttribute('data-placeholder') || labelled
+        || inner || buttonValue || el.getAttribute('title') || (image ? image.alt : '')
+        || el.getAttribute('name')
+      ).slice(0, 80);
+      const autocomplete = (el.getAttribute('autocomplete') || '').toLowerCase();
+      const label = name || (
+        inputType === 'password' || autocomplete.includes('password') ? 'パスワード'
+        : autocomplete === 'username' || autocomplete === 'email' ? 'ユーザー名'
+        : kind === 'type' ? '入力欄' : ''
+      );
+      if (!label) continue;
+      if (role === 'link') {
+        // 画像と文字で同じ先を二重に指すリンクは 1 つにまとめる。
+        const key = label + '\n' + (el.getAttribute('href') || '');
+        if (seenLinks.has(key)) continue;
+        seenLinks.add(key);
+      }
+      const form = el.form || el.closest('form');
+      const search = textLike && (
+        inputType === 'search' || role === 'searchbox' || Boolean(el.closest('[role="search"]'))
+        || searchName.test(el.getAttribute('name') || '')
+        || /search|検索/i.test(form ? form.getAttribute('action') || '' : '')
+      );
+      const buttonLike = !textLike && (
+        tag === 'button' || role === 'button' || (tag === 'input' && buttonTypes.includes(inputType))
+      );
+      const priority = textLike ? 0 : role === 'link' ? 2 : 1;
+      found.push({ el, order, priority, role, label, kind, inputType, autocomplete, form, search, buttonLike });
+    }
+  }
+
+  const kept = found
+    .sort((a, b) => a.priority - b.priority || a.order - b.order)
+    .slice(0, MAX_ELEMENTS)
+    .sort((a, b) => a.order - b.order);
+  kept.forEach((item, index) => {
+    item.id = 'e' + (index + 1);
+    item.el.setAttribute('data-jev-use-id', item.id);
+  });
+
+  // 入力欄ごとの送信ボタンを、指示文ではなくページの構造とボタン自身の名前で決める。
+  // 1) 同じ form に type=submit が 1 つだけならそれ。
+  // 2) 入力欄から祖先へ遡り、送信らしいボタン（type=submit か、名前が送信・send など）が 1 つだけ入った祖先があればそれ。
+  //    チャット欄は添付・音声入力・送信などのボタンが並ぶため、個数だけでは決まらない。
+  // 3) 送信らしいボタンが無ければ、最初にボタンを含んだ祖先にボタンが 1 つだけのときそれ。
+  const buttons = kept.filter(item => item.buttonLike);
+  // type 属性の無い button は form の外でも type が submit になるので、form に属するものだけ数える。
+  const sendLike = b => (b.el.form && b.el.type === 'submit') || sendName.test(b.label);
+  const submitFor = field => {
+    if (field.form) {
+      const submits = buttons.filter(b => field.form.contains(b.el) && b.el.type === 'submit');
+      if (submits.length === 1) return submits[0].id;
+    }
+    let lone = null;
+    let node = field.el.parentElement;
+    for (let depth = 0; node && node !== document.body && depth < MAX_SUBMIT_DEPTH; depth++) {
+      const inside = buttons.filter(b => node.contains(b.el));
+      const sends = inside.filter(sendLike);
+      if (sends.length) return sends.length === 1 ? sends[0].id : '';
+      if (lone === null && inside.length) lone = inside.length === 1 ? inside[0].id : '';
+      if (node === field.form) break;
+      node = node.parentElement;
+    }
+    return lone || '';
+  };
+
+  const elements = kept.map(item => {
+    const el = item.el;
+    const textLike = item.kind === 'type';
+    return {
+      id: item.id,
+      role: item.role,
+      name: item.label,
+      kind: item.kind,
+      inputType: item.inputType,
+      autocomplete: item.autocomplete,
+      disabled: el.matches(':disabled') || el.getAttribute('aria-disabled') === 'true',
+      filled: textLike && Boolean(clean(el.isContentEditable ? el.innerText : el.value)),
+      formId: item.form ? 'f' + (Array.from(document.forms).indexOf(item.form) + 1) : '',
+      search: item.search,
+      submitId: textLike ? submitFor(item) : '',
+    };
+  });
   return {
     url: location.href,
     title: document.title || '',
-    excerpt: (document.body && document.body.innerText || '').replace(/\\s+/g, ' ').trim().slice(0, 1500),
-    feedback: Array.from(document.querySelectorAll(
+    excerpt: clip(pageText(), EXCERPT_LIMIT),
+    feedback: clean(Array.from(document.querySelectorAll(
       '[role="status"], [role="alert"], [aria-live="polite"], [aria-live="assertive"]'
-    )).filter(el => {
-      const style = getComputedStyle(el);
-      const rect = el.getBoundingClientRect();
-      return rect.width >= 2 && rect.height >= 2 && style.visibility !== 'hidden' && style.display !== 'none';
-    }).map(el => el.innerText || '').join(' ').replace(/\\s+/g, ' ').trim().slice(0, 300),
-    elements: out,
+    )).filter(visible).map(el => el.innerText).join(' ')).slice(0, 300),
+    elements,
   };
 }
 """
@@ -142,24 +263,21 @@ class BrowserSession:
         await self._settle()
 
     async def fill(self, element_id: str, text: str, submit: bool) -> None:
+        """値を入れて反映を確かめる。戻されたら打鍵で入れ直し、それでも違えば例外にする。"""
         locator = self._locator(element_id)
         await locator.fill(text, timeout=8000)
+        await self._settle()
+        if not await self._holds(locator, text):
+            # React やリッチエディタは、値を直接入れても自分の状態で上書きし直すことがある。
+            await locator.press("ControlOrMeta+a", timeout=8000)
+            await locator.press("Backspace")
+            await locator.press_sequentially(text, delay=TYPE_DELAY_MS)
+            await self._settle()
+            if not await self._holds(locator, text):
+                raise RuntimeError("入力欄に指定した文字列が反映されませんでした。")
         if submit:
             await locator.press("Enter")
-        await self._settle()
-        if not submit:
-            try:
-                actual = await locator.evaluate(
-                    "el => el.isContentEditable ? el.innerText : el.value", timeout=2000
-                )
-            except Exception as e:
-                raise RuntimeError("入力欄の値を確認できませんでした。") from e
-            if actual != text:
-                raise RuntimeError("入力欄に指定した文字列が反映されませんでした。")
-
-    async def scroll(self) -> None:
-        await self._page.mouse.wheel(0, 900)
-        await self._settle()
+            await self._settle()
 
     async def back(self) -> None:
         await self._page.go_back(wait_until="domcontentloaded", timeout=8000)
@@ -195,6 +313,17 @@ class BrowserSession:
 
     def _locator(self, element_id: str) -> Any:
         return self._page.locator(f'[data-jev-use-id="{element_id}"]')
+
+    @staticmethod
+    async def _holds(locator: Any, text: str) -> bool:
+        """入力欄の値が text と一致するか。リッチエディタの改行や空白の差は無視する。"""
+        try:
+            actual = await locator.evaluate(
+                "el => el.isContentEditable ? el.innerText : el.value", timeout=2000
+            )
+        except Exception as e:
+            raise RuntimeError("入力欄の値を確認できませんでした。") from e
+        return " ".join(str(actual).split()) == " ".join(text.split())
 
     async def _settle(self) -> None:
         try:

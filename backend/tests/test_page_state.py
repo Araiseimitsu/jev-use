@@ -6,6 +6,7 @@ from app.services.page_state import (
     action_catalog,
     elements_from_raw,
     field_purpose,
+    jev_excerpt,
     is_allowed_url,
     is_human_check,
     needs_user_input,
@@ -66,7 +67,7 @@ def test_catalog_uses_element_ids_and_control_actions() -> None:
     catalog = action_catalog((Element("e1", "button", "発注", "click"),))
     ids = [option.id for option in catalog]
 
-    assert ids == ["click:e1", "scroll_down", "back", "wait", "done"]
+    assert ids == ["click:e1", "back", "wait", "done"]
     assert all("x" not in option.id for option in catalog)
 
 
@@ -101,6 +102,36 @@ def test_status_feedback_is_available_for_post_submit_check() -> None:
 def test_search_field_submits_on_enter() -> None:
     assert submits_on_enter(Element("e1", "searchbox", "検索", "type")) is True
     assert submits_on_enter(Element("e2", "link", "検索", "click")) is False
+    # 名前に「検索」が無くても、ページが検索欄と示していれば Enter で検索する。
+    assert submits_on_enter(Element("e3", "combobox", "キーワード", "type", search=True)) is True
+    # チャット欄の Enter は送信になるので押さない（送信は承認を経てボタンで行う）。
+    assert submits_on_enter(Element("e4", "textbox", "メッセージ", "type")) is False
+
+
+def test_type_option_tells_what_kind_of_field_it_is() -> None:
+    elements = (
+        Element("e1", "input", "キーワード", "type", "search"),
+        Element("e2", "input", "連絡先", "type", "email"),
+        Element("e3", "textbox", "Message", "type"),
+        Element("e4", "input", "件名", "type", "text"),
+    )
+
+    descriptions = [option.description for option in action_catalog(elements)[:4]]
+
+    assert "検索欄" in descriptions[0]
+    assert "メールアドレス欄" in descriptions[1]
+    assert "文章の入力欄" in descriptions[2]
+    assert "1 行の入力欄" in descriptions[3]
+
+
+def test_structure_fields_are_read_from_the_page() -> None:
+    elements = elements_from_raw([
+        {"id": "e1", "role": "textbox", "name": "メッセージ", "kind": "type", "search": False, "submitId": "e2"},
+        {"id": "e2", "role": "button", "name": "送る", "kind": "click"},
+    ])
+
+    assert elements[0].submit_id == "e2"
+    assert elements[1].submit_id == ""
 
 
 def test_login_lines_stay_out_of_the_request() -> None:
@@ -171,3 +202,13 @@ def test_short_password_does_not_rewrite_other_text() -> None:
 
     assert "https://example.com/a" in redacted
     assert "パスワード: ［パスワード］" in redacted
+
+
+def test_jev_excerpt_keeps_head_and_latest_tail() -> None:
+    view = PageView("https://example.com/chat", "会話", "見出し" + "あ" * 2000 + "最新の回答", ())
+
+    text = jev_excerpt(view)
+
+    assert text.startswith("見出し")
+    assert text.endswith("最新の回答")
+    assert len(text) <= 800

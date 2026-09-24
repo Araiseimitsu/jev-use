@@ -27,6 +27,7 @@ const denyBtn = document.querySelector("#deny-btn");
 const result = document.querySelector("#result");
 const resultText = document.querySelector("#result-text");
 const copyBtn = document.querySelector("#copy-btn");
+const greeting = document.querySelector("#greeting");
 const recentHistory = document.querySelector("#recent-history");
 const historyList = document.querySelector("#history-list");
 const HISTORY_KEY = "jev-use:recent-tasks";
@@ -147,9 +148,12 @@ form.addEventListener("submit", async (event) => {
       const assessment = await postJson("/browser/assess", { task });
       if (assessment.requires_confirmation) {
         confirmNote.hidden = false;
-        confirmNote.textContent = (assessment.reasons || []).join(" ");
+        confirmNote.textContent = `${(assessment.reasons || []).join(" ")}（このまま Enter で実行）`;
         acceptedTask = task;
         runBtn.textContent = "確認して実行";
+        // ボタン無効化でフォーカスが外れても、続けて Enter で実行できるよう入力欄へ戻す
+        runBtn.disabled = false;
+        taskInput.focus();
         return;
       }
     } catch (error) {
@@ -335,3 +339,18 @@ copyBtn.addEventListener("click", async () => {
 
 renderRecentTasks();
 init();
+
+// 毎日開いたときに少し表情が変わるよう、時間帯で挨拶を切り替える。
+function greet() {
+  const now = new Date();
+  const hour = now.getHours();
+  const text =
+    hour < 5 ? "夜更かしですね 🌙" :
+    hour < 11 ? "おはようございます ☀️" :
+    hour < 17 ? "こんにちは 🌤️" :
+    hour < 22 ? "おつかれさまです 🌇" : "こんばんは 🌙";
+  const date = now.toLocaleDateString("ja-JP", { month: "long", day: "numeric", weekday: "short" });
+  greeting.textContent = `${date}　${text}`;
+}
+
+greet();

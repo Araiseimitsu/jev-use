@@ -78,7 +78,7 @@ def build_risk_questions() -> dict[str, Any]:
 
 def risk_state(task: str, view: PageView, action_id: str, description: str, text: str) -> dict[str, Any]:
     """選択要素とフォームの関係を渡す。本文や入力済みの値は含めない。"""
-    element_id = action_id.partition(":")[2]
+    element_id = action_id.partition(":")[2].partition("#")[0]
     selected_index = next((i for i, element in enumerate(view.elements) if element.id == element_id), None)
     selected = view.elements[selected_index] if selected_index is not None else None
     related = [
@@ -144,7 +144,7 @@ class BrowserDecider:
         plan = await self.planner.plan(client, task, view, options, history)
         if plan is None:
             return fallback_decision("Gemini が次の操作を選べませんでした。")
-        text = plan.text if plan.action_id.startswith(("type:", "select:")) else None
+        text = plan.text if plan.action_id.startswith("type:") else None
         if plan.action_id in SAFE_ACTIONS:
             return Decision(
                 action_id=plan.action_id,

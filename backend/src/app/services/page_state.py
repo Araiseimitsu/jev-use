@@ -55,8 +55,14 @@ _HUMAN_CHECK_PHRASES = (
     "該当するものがない場合",
 )
 
-# 候補の説明に載せるプルダウンの選択肢の数
-MAX_CHOICES_SHOWN = 15
+@dataclass(frozen=True)
+class SelectChoice:
+    """DOM 上の元の位置を保ったプルダウンの選択肢。"""
+
+    index: int
+    label: str
+    value: str
+
 
 @dataclass(frozen=True)
 class Element:
@@ -75,11 +81,14 @@ class Element:
     search: bool = False
     # 入力欄に対応する送信ボタンの id。ページの構造から決め、無ければ空。
     submit_id: str = ""
-    # プルダウン（select）の選択肢の表示名。クリックでは選べないため、名前で選ぶ。
-    choices: tuple[str, ...] = ()
+    # 同名の選択肢を区別するため、元の DOM index も保持する。
+    choices: tuple[SelectChoice, ...] = ()
 
-    def to_dict(self) -> dict[str, str | bool]:
-        return asdict(self)
+    def to_dict(self) -> dict[str, object]:
+        data = asdict(self)
+        # value は実行前の照合にだけ使い、画面の観測イベントには載せない。
+        data["choices"] = [{"index": choice.index, "label": choice.label} for choice in self.choices]
+        return data
 
 
 @dataclass(frozen=True)
@@ -159,7 +168,14 @@ def elements_from_raw(raw: object) -> tuple[Element, ...]:
         submit_id = str(item.get("submitId") or "")
         raw_choices = item.get("choices")
         choices = tuple(
-            str(choice).strip() for choice in raw_choices if str(choice).strip()
+            SelectChoice(choice["index"], choice["label"].strip(), choice["value"])
+            for choice in raw_choices
+            if isinstance(choice, dict)
+            and type(choice.get("index")) is int
+            and choice["index"] >= 0
+            and isinstance(choice.get("label"), str)
+            and choice["label"].strip()
+            and isinstance(choice.get("value"), str)
         ) if isinstance(raw_choices, list) else ()
         if kind == "select" and not choices:
             continue
@@ -245,9 +261,13 @@ def action_catalog(
             description = f"「{element.name}」（{field_kind(element)}）に、依頼に合う文字列を入力する"
             options.append(ActionOption(f"type:{element.id}", description))
         elif element.kind == "select":
-            listed = " / ".join(element.choices[:MAX_CHOICES_SHOWN])
-            description = f"「{element.name}」（プルダウン）で、次のどれかを選ぶ: {listed}"
-            options.append(ActionOption(f"select:{element.id}", description))
+            options.extend(
+                ActionOption(
+                    f"select:{element.id}#{choice.index}",
+                    f"「{element.name}」（プルダウン）の {choice.index} 番「{choice.label}」を選ぶ",
+                )
+                for choice in element.choices
+            )
         else:
             description = f"「{element.name}」（{element.role}）をクリックする"
             options.append(ActionOption(f"click:{element.id}", description))

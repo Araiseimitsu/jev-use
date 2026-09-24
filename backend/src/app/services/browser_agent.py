@@ -710,7 +710,8 @@ class BrowserAgentRunner:
             await session.wait()
             return ""
 
-        kind, element_id = action_id.split(":", 1)
+        kind, element_ref = action_id.split(":", 1)
+        element_id, _, choice_index = element_ref.partition("#")
         element = next((item for item in elements if item.id == element_id), None)
         if element is None:
             raise RuntimeError(f"操作対象が見つかりません: {action_id}")
@@ -718,10 +719,13 @@ class BrowserAgentRunner:
             await session.click(element_id)
             return ""
         if kind == "select":
-            if not text:
+            if not choice_index.isdecimal():
                 raise RuntimeError("プルダウンで選ぶ選択肢が決まっていません。")
-            await session.select(element_id, text)
-            return text
+            choice = next((item for item in element.choices if item.index == int(choice_index)), None)
+            if choice is None:
+                raise RuntimeError("プルダウンの選択肢が見つかりません。")
+            await session.select(element_id, choice.index, choice.label, choice.value)
+            return choice.label
         if kind == "key":
             key = send_key(element)
             if key is None:
@@ -827,6 +831,7 @@ def _fields_sent_by(view: PageView, button_id: str) -> frozenset[tuple[str, str]
 def _element(view: PageView, action_id: str) -> Element | None:
     """click:e3 や key:e1 の操作対象の要素。"""
     _, _, element_id = action_id.partition(":")
+    element_id = element_id.partition("#")[0]
     return next((element for element in view.elements if element.id == element_id), None)
 
 

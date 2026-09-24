@@ -54,6 +54,16 @@ def test_risk_question_is_only_about_the_chosen_action() -> None:
     assert "image" not in state
 
 
+def test_risk_state_uses_the_select_element_for_a_numbered_choice() -> None:
+    view = PageView(
+        "https://shop.example", "商品", "", (Element("e7", "combobox", "都道府県", "select"),)
+    )
+
+    state = risk_state("東京を選ぶ", view, "select:e7#13", "東京を選ぶ", "")
+
+    assert state["element"]["name"] == "都道府県"
+
+
 def test_decision_takes_the_plan_and_jevs_risk() -> None:
     asker, calls = fake_asker(jev_response(nouls=RISK_VALUES))
     planner = FakePlanner(_plan())

@@ -236,13 +236,25 @@ def test_send_key_is_read_from_the_fields_hint() -> None:
     assert send_key(field("メッセージ")) == "Enter"
 
 
-def test_select_keeps_its_choices_and_is_offered_as_a_choice() -> None:
+def test_select_choices_have_closed_ids_with_original_indices() -> None:
     elements = elements_from_raw(
         [{"id": "e1", "role": "combobox", "name": "並べ替え", "kind": "select",
-          "choices": ["おすすめ順", "価格の安い順", "価格の高い順"]}]
+          "choices": [{"index": 0, "label": "おすすめ順", "value": "default"},
+                      {"index": 2, "label": "その他", "value": "a"},
+                      {"index": 3, "label": "その他", "value": "b"}]}]
     )
 
-    assert elements[0].choices == ("おすすめ順", "価格の安い順", "価格の高い順")
-    option = action_catalog(elements)[0]
-    assert option.id == "select:e1"
-    assert "価格の安い順" in option.description
+    assert [(choice.index, choice.label) for choice in elements[0].choices] == [
+        (0, "おすすめ順"), (2, "その他"), (3, "その他")
+    ]
+    options = action_catalog(elements)
+    assert [option.id for option in options[:3]] == ["select:e1#0", "select:e1#2", "select:e1#3"]
+    assert "その他" in options[2].description
+    assert "value" not in elements[0].to_dict()["choices"][0]
+
+
+def test_select_offers_choices_after_the_fortieth() -> None:
+    choices = [{"index": i, "label": f"地域{i}", "value": str(i)} for i in range(47)]
+    elements = elements_from_raw([{"id": "e1", "role": "combobox", "name": "地域", "kind": "select", "choices": choices}])
+
+    assert "select:e1#46" in {option.id for option in action_catalog(elements)}

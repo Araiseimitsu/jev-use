@@ -238,7 +238,11 @@ READ_SCRIPT = r"""
       search: item.search,
       submitId: textLike ? submitFor(item) : '',
       choices: item.kind === 'select'
-        ? Array.from(el.options).filter(o => !o.disabled).map(o => clean(o.label || o.text)).filter(Boolean).slice(0, 40)
+        ? Array.from(el.options).flatMap((option, index) => {
+            const label = clean(option.label || option.text);
+            return label && !option.matches(':disabled')
+              ? [{ index, label, value: option.value }] : [];
+          })
         : [],
     };
   });
@@ -337,10 +341,19 @@ class BrowserSession:
             await locator.press("Enter")
             await self._settle()
 
-    async def select(self, element_id: str, choice: str) -> None:
-        """プルダウンで選ぶ。サイトが見た目の部品を重ねていてもクリックせずに選べる。"""
+    async def select(self, element_id: str, index: int, label: str, value: str) -> None:
+        """読み取った DOM 位置を照合してからプルダウンを選ぶ。"""
+        locator = self._locator(element_id)
+        current = await locator.evaluate(
+            r"(el, index) => { const option = el.options[index]; return option ? "
+            r"{ label: option.label.replace(/\s+/g, ' ').trim(), value: option.value, "
+            r"disabled: option.matches(':disabled') } : null; }",
+            index,
+        )
+        if current != {"label": label, "value": value, "disabled": False}:
+            raise RuntimeError("プルダウンの選択肢が変わりました。画面を読み直してください。")
         before = self._page.url
-        await self._locator(element_id).select_option(label=choice, timeout=8000)
+        await locator.select_option(index=index, timeout=8000)
         # 並べ替えなどは選んだ後にスクリプトでページを移すため、すぐ読むと移る前の一覧を読んでしまう。
         try:
             await self._page.wait_for_url(lambda url: url != before, timeout=SELECT_NAVIGATION_MS)

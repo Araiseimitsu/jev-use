@@ -7,7 +7,7 @@ import pytest
 from app.core.config import settings
 from app.services.browser_agent import BrowserAgentRunner
 from app.services.jev.browser_decider import Decision
-from app.services.page_state import Element, PageView, rank_elements
+from app.services.page_state import Element, PageView, SelectChoice, rank_elements
 
 
 class FakeSession:
@@ -47,8 +47,8 @@ class FakeSession:
     async def press_key(self, element_id: str, key: str) -> None:
         self.actions.append(("key", element_id, key))
 
-    async def select(self, element_id: str, choice: str) -> None:
-        self.actions.append(("select", element_id, choice))
+    async def select(self, element_id: str, index: int, label: str, value: str) -> None:
+        self.actions.append(("select", element_id, index, label, value))
 
     async def back(self) -> None:
         self.actions.append(("back",))
@@ -980,9 +980,9 @@ def test_ctrl_enter_is_pressed_for_a_ctrl_enter_field() -> None:
 def test_select_action_picks_the_chosen_option() -> None:
     view = PageView(
         "https://shop.example/s", "結果", "",
-        (Element("e1", "combobox", "並べ替え", "select", choices=("おすすめ順", "価格の安い順")),),
+        (Element("e1", "combobox", "並べ替え", "select", choices=(SelectChoice(0, "おすすめ順", "default"), SelectChoice(1, "価格の安い順", "cheap"))),),
     )
     session = FakeSession(view)
-    _events(_runner(session, [_decision("select:e1", text="価格の安い順"), _decision("done", done=0.9)]))
+    _events(_runner(session, [_decision("select:e1#1"), _decision("done", done=0.9)]))
 
-    assert session.actions[0] == ("select", "e1", "価格の安い順")
+    assert session.actions[0] == ("select", "e1", 1, "価格の安い順", "cheap")

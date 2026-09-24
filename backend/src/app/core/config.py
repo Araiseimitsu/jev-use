@@ -31,7 +31,7 @@ class Settings(BaseSettings):
 
     # TypeSafe AI（System One モデル Jev）による操作の危険度の判定と実行前の見積もり
     typesafe_api_key: str = ""
-    typesafe_model: str = "jev-latest"
+    typesafe_model: str = "jev-1.13.0"
     typesafe_timeout_seconds: float = 10.0
     # この確率以上の操作は、人間の確認がなければ実行しない
     typesafe_risk_threshold: float = 0.7

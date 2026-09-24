@@ -6,6 +6,7 @@ import pytest
 from playwright.async_api import async_playwright
 
 from app.services.browser_session import BrowserSession
+from app.services.page_state import SelectChoice
 
 
 def test_fill_checks_the_value_after_the_page_updates() -> None:
@@ -241,6 +242,32 @@ def test_excerpt_without_main_skips_header_and_footer() -> None:
         assert "カテゴリ" not in view.excerpt
         assert "隠れた文" not in view.excerpt
         select = next(element for element in view.elements if element.kind == "select")
-        assert select.choices == ("価格: 安い順",)
+        assert select.choices == (SelectChoice(0, "価格: 安い順", "価格: 安い順"),)
+
+    _with_page(html, check)
+
+
+def test_select_uses_original_index_and_checks_stale_options() -> None:
+    regions = "".join(f'<option value="r{i}">地域{i}</option>' for i in range(47))
+    html = (
+        '<select aria-label="地域"><option value="blank"></option>'
+        '<option disabled>利用不可</option><option value="a">その他</option>'
+        f'<option value="b">その他</option>{regions}</select>'
+    )
+
+    async def check(session: BrowserSession, page) -> None:
+        field = next(element for element in (await session.read()).elements if element.kind == "select")
+        assert [choice.index for choice in field.choices[:2]] == [2, 3]
+        assert field.choices[-1].index == 50
+
+        await session.select(field.id, 3, "その他", "b")
+        assert await page.locator("select").input_value() == "b"
+
+        await page.locator("select").evaluate("el => { el.options[3].label = '変更済み'; }")
+        with pytest.raises(RuntimeError, match="選択肢が変わりました"):
+            await session.select(field.id, 3, "その他", "b")
+
+        await session.select(field.id, 50, "地域46", "r46")
+        assert await page.locator("select").input_value() == "r46"
 
     _with_page(html, check)

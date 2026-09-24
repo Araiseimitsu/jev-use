@@ -28,6 +28,8 @@ const result = document.querySelector("#result");
 const resultText = document.querySelector("#result-text");
 const copyBtn = document.querySelector("#copy-btn");
 const greeting = document.querySelector("#greeting");
+const greetingSub = document.querySelector("#greeting-sub");
+const themeMeta = document.querySelector('meta[name="theme-color"]');
 const recentHistory = document.querySelector("#recent-history");
 const historyList = document.querySelector("#history-list");
 const HISTORY_KEY = "jev-use:recent-tasks";
@@ -340,17 +342,86 @@ copyBtn.addEventListener("click", async () => {
 renderRecentTasks();
 init();
 
-// 毎日開いたときに少し表情が変わるよう、時間帯で挨拶を切り替える。
-function greet() {
-  const now = new Date();
-  const hour = now.getHours();
-  const text =
-    hour < 5 ? "夜更かしですね 🌙" :
-    hour < 11 ? "おはようございます ☀️" :
-    hour < 17 ? "こんにちは 🌤️" :
-    hour < 22 ? "おつかれさまです 🌇" : "こんばんは 🌙";
-  const date = now.toLocaleDateString("ja-JP", { month: "long", day: "numeric", weekday: "short" });
-  greeting.textContent = `${date}　${text}`;
+// 毎日開いたときに少し表情が変わるよう、時間帯で挨拶とテーマを切り替える。
+// 言葉は当日中ずっと同じものが選ばれ、日付が変わると別の候補から選ばれる。
+const PERIODS = [
+  {
+    key: "night",
+    ranges: [[19, 24], [0, 5]],
+    meta: "#161c2d",
+    hello: ["こんばんは 🌙", "まだ起きてるんですね 🌙", "静かな時間ですね 🌙", "おつかれさま、今日もお疲れさまでした 🌙"],
+    lines: [
+      "深追いはほどほどに、目は大事に。",
+      "眠る前の調べものは、明日の自分への手紙。",
+      "今日の分はもう取り分終わった、と自分に言い訳するのも自由です。",
+      "夜こそはやることが進む、昔から研究室の定説です。",
+    ],
+  },
+  {
+    key: "morning",
+    ranges: [[5, 11]],
+    meta: "#f2f9fd",
+    hello: ["おはようございます ☀️", "朝から元気ですね ☀️", "いい朝ですね ☀️"],
+    lines: [
+      "今日もいい一日を。",
+      "最初の一歩は今日もうまくいくはず。",
+      "コーヒーかお茶か、それも大事な選択。",
+    ],
+  },
+  {
+    key: "day",
+    ranges: [[11, 17]],
+    meta: "#fff8f0",
+    hello: ["こんにちは 🌤️", "おつかれさま 🌤️", "昼過ぎてますね 🌤️"],
+    lines: [
+      "詰め込みすぎに注意。",
+      "そろそろ一杯水を飲む時間です。",
+      "背筋を伸ばすと調べものの精度も上がります（体感）。",
+    ],
+  },
+  {
+    key: "evening",
+    ranges: [[17, 19]],
+    meta: "#fff5ee",
+    hello: ["おつかれさまです 🌇", "いい夕方ですね 🌇", "そろそろ帰りの時間 🌇"],
+    lines: [
+      "夕飯はちゃんと食べますよね？",
+      "今日やれた分だけ、今日の分は満点。",
+      "そろそろ日中のノイズを捨てる時間です。",
+    ],
+  },
+];
+
+// 日付ごとに異なる候補を選ぶだけの軽いハッシュ
+function daySeed(now) {
+  const key = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}`;
+  let hash = 0;
+  for (const ch of key) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
+  return hash;
 }
 
-greet();
+function periodOf(hour) {
+  return PERIODS.find(({ ranges }) => ranges.some(([start, end]) => hour >= start && hour < end));
+}
+
+let currentPeriod = null;
+
+function applyTime() {
+  const now = new Date();
+  const period = periodOf(now.getHours());
+  if (period.key !== currentPeriod) {
+    document.documentElement.dataset.time = period.key;
+    themeMeta.setAttribute("content", period.meta);
+    currentPeriod = period.key;
+  }
+
+  const date = now.toLocaleDateString("ja-JP", { month: "long", day: "numeric", weekday: "short" });
+  const { hello, lines } = period;
+  const pick = (candidates, offset) => candidates[(daySeed(now) + offset) % candidates.length];
+  greeting.textContent = `${date}　${pick(hello, 0)}`;
+  greetingSub.textContent = pick(lines, 1);
+}
+
+applyTime();
+// 1分ごとに時間帯が変わったかだけ見る。実行中レイアウトでも邪魔にはならない。
+setInterval(applyTime, 60_000);

@@ -16,6 +16,8 @@ STEP_SCALE: tuple[str, ...] = (
 
 #: 各レベルに対する最大ステップ数の提案値
 STEP_SCALE_TO_MAX_STEPS: dict[int, int] = {0: 3, 1: 8, 2: 15, 3: 25}
+# 長い作業の可能性を平均値で消さないため、この割合を含む段階まで確保する。
+STEP_COVERAGE = 0.8
 
 #: API の max_steps 上限（routes のバリデーションと揃える）
 MAX_STEPS_LIMIT = 50
@@ -88,6 +90,22 @@ def clamp_max_steps(value: int) -> int:
     return max(1, min(value, MAX_STEPS_LIMIT))
 
 
+def suggested_steps(probabilities: dict[int, float]) -> int:
+    """Score の分布で少なくとも STEP_COVERAGE を含む段階の上限を返す。"""
+    weights = [float(probabilities.get(index, 0.0)) for index in range(len(STEP_SCALE))]
+    if any(weight < 0 or not 0 <= weight <= 1 for weight in weights):
+        raise ValueError("ステップ数の確率が不正です")
+    total = sum(weights)
+    if not 0.99 <= total <= 1.01:
+        raise ValueError("ステップ数の確率の合計が不正です")
+    cumulative = 0.0
+    for index, weight in enumerate(weights):
+        cumulative += weight / total
+        if cumulative >= STEP_COVERAGE:
+            return clamp_max_steps(STEP_SCALE_TO_MAX_STEPS[index])
+    return clamp_max_steps(STEP_SCALE_TO_MAX_STEPS[len(STEP_SCALE) - 1])
+
+
 def interpret_assessment(response: Any, latency_ms: int) -> TaskAssessment:
     """Jev の回答を TaskAssessment へ変換する。
 
@@ -97,8 +115,7 @@ def interpret_assessment(response: Any, latency_ms: int) -> TaskAssessment:
     risk = float(response.nouls["risk"].noul)
     clarity = float(response.nouls["clarity"].noul)
     feasibility = float(response.nouls["feasibility"].noul)
-    scale = int(round(float(response.scores["steps"].score)))
-    scale = min(max(scale, 0), len(STEP_SCALE) - 1)
+    max_steps = suggested_steps(response.scores["steps"].probabilities)
 
     reasons = []
     if risk >= settings.typesafe_risk_threshold:
@@ -116,7 +133,7 @@ def interpret_assessment(response: Any, latency_ms: int) -> TaskAssessment:
         risk_probability=risk,
         clarity_probability=clarity,
         feasibility_probability=feasibility,
-        suggested_max_steps=clamp_max_steps(STEP_SCALE_TO_MAX_STEPS[scale]),
+        suggested_max_steps=max_steps,
         requires_confirmation=bool(reasons),
         reasons=reasons,
         model=model_of(response),

@@ -21,6 +21,7 @@ def jev_response(
     choices: dict[str, Any] | None = None,
     nouls: dict[str, float] | None = None,
     scores: dict[str, float] | None = None,
+    score_probabilities: dict[str, dict[int, float]] | None = None,
     model: str = "jev-1.13.0",
 ) -> Any:
     """SystemOneResponse の形を模した最小オブジェクト。"""
@@ -28,7 +29,14 @@ def jev_response(
         model=model,
         choices=choices or {},
         nouls={k: noul(v) for k, v in (nouls or {}).items()},
-        scores={k: SimpleNamespace(score=v, confidence=0.9) for k, v in (scores or {}).items()},
+        scores={
+            k: SimpleNamespace(
+                score=v,
+                confidence=0.9,
+                probabilities=(score_probabilities or {}).get(k, {max(0, min(round(v), 3)): 1.0}),
+            )
+            for k, v in (scores or {}).items()
+        },
     )
 
 

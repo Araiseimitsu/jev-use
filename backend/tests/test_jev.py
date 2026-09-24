@@ -67,6 +67,33 @@ def test_assess_clamps_out_of_range_step_score() -> None:
     assert result.suggested_max_steps == 25
 
 
+def test_assess_uses_upper_part_of_step_distribution() -> None:
+    response = jev_response(
+        nouls={"risk": 0.1, "clarity": 0.9, "feasibility": 0.9},
+        scores={"steps": 1.5},
+        score_probabilities={"steps": {0: 0.5, 3: 0.5}},
+    )
+    asker, _ = fake_asker(response)
+
+    result = asyncio.run(TaskAssessor(asker).assess("複数ページを調べる"))
+
+    assert result.suggested_max_steps == 25
+
+
+def test_assess_falls_back_on_invalid_step_distribution() -> None:
+    response = jev_response(
+        nouls={"risk": 0.1, "clarity": 0.9, "feasibility": 0.9},
+        scores={"steps": 1.0},
+        score_probabilities={"steps": {0: 0.4, 1: 0.4}},
+    )
+    asker, _ = fake_asker(response)
+
+    result = asyncio.run(TaskAssessor(asker).assess("調べる"))
+
+    assert result.used_fallback is True
+    assert result.suggested_max_steps == settings.default_max_steps
+
+
 def test_clamp_max_steps_limits_range() -> None:
     assert clamp_max_steps(0) == 1
     assert clamp_max_steps(MAX_STEPS_LIMIT + 10) == MAX_STEPS_LIMIT

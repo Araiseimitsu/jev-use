@@ -125,8 +125,10 @@ class TextWriter:
         prompt = (
             "ページの抜粋だけを根拠に、日本語で短く書け。"
             "指示が質問なら答えを書く。抜粋に答えが無ければ、その旨を書く。"
+            "最安値・最高値などを探す指示なら、抜粋の一覧の価格をすべて比べて答え、商品名も書く。"
+            "先頭の広告（スポンサー）の商品だけで決めない。"
             "指示が送信・登録などの操作の依頼なら、抜粋から分かる結果（完了やエラーの表示など）を書く。\n"
-            f"指示: {task}\nURL: {url}\nタイトル: {title}\n抜粋: {excerpt[:1500]}"
+            f"指示: {task}\nURL: {url}\nタイトル: {title}\n抜粋: {excerpt[:4000]}"
         )
         text = await self._generate(client, prompt)
         return text or fallback_summary(title, excerpt)

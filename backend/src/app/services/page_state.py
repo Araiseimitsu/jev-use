@@ -55,6 +55,8 @@ _HUMAN_CHECK_PHRASES = (
     "該当するものがない場合",
 )
 
+# 候補の説明に載せるプルダウンの選択肢の数
+MAX_CHOICES_SHOWN = 15
 
 @dataclass(frozen=True)
 class Element:
@@ -73,6 +75,8 @@ class Element:
     search: bool = False
     # 入力欄に対応する送信ボタンの id。ページの構造から決め、無ければ空。
     submit_id: str = ""
+    # プルダウン（select）の選択肢の表示名。クリックでは選べないため、名前で選ぶ。
+    choices: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, str | bool]:
         return asdict(self)
@@ -143,7 +147,7 @@ def elements_from_raw(raw: object) -> tuple[Element, ...]:
         kind = item.get("kind")
         element_id = str(item.get("id", "")).strip()
         name = str(item.get("name", "")).strip()
-        if kind not in ("click", "type") or not element_id or not name:
+        if kind not in ("click", "type", "select") or not element_id or not name:
             continue
         role = str(item.get("role", "")).strip() or kind
         input_type = str(item.get("inputType") or item.get("input_type") or "").strip()
@@ -153,10 +157,16 @@ def elements_from_raw(raw: object) -> tuple[Element, ...]:
         form_id = str(item.get("formId") or "")
         search = item.get("search") is True
         submit_id = str(item.get("submitId") or "")
+        raw_choices = item.get("choices")
+        choices = tuple(
+            str(choice).strip() for choice in raw_choices if str(choice).strip()
+        ) if isinstance(raw_choices, list) else ()
+        if kind == "select" and not choices:
+            continue
         elements.append(
             Element(
                 element_id, role, name, kind, input_type, autocomplete, disabled, filled, form_id,
-                search, submit_id,
+                search, submit_id, choices,
             )
         )
     return tuple(elements)
@@ -169,7 +179,7 @@ def page_view_from_raw(raw: object) -> PageView:
     return PageView(
         url=str(data.get("url", "")),
         title=str(data.get("title", "")),
-        excerpt=excerpt[:1500],
+        excerpt=excerpt[:4000],
         elements=elements_from_raw(data.get("elements")),
         feedback=str(data.get("feedback", ""))[:300],
     )
@@ -234,6 +244,10 @@ def action_catalog(
                 continue
             description = f"「{element.name}」（{field_kind(element)}）に、依頼に合う文字列を入力する"
             options.append(ActionOption(f"type:{element.id}", description))
+        elif element.kind == "select":
+            listed = " / ".join(element.choices[:MAX_CHOICES_SHOWN])
+            description = f"「{element.name}」（プルダウン）で、次のどれかを選ぶ: {listed}"
+            options.append(ActionOption(f"select:{element.id}", description))
         else:
             description = f"「{element.name}」（{element.role}）をクリックする"
             options.append(ActionOption(f"click:{element.id}", description))

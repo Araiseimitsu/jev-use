@@ -96,7 +96,7 @@ class BrowserDecider:
         plan = await self.planner.plan(client, task, view, options, history)
         if plan is None:
             return fallback_decision("Gemini が次の操作を選べませんでした。")
-        text = plan.text if plan.action_id.startswith("type:") else None
+        text = plan.text if plan.action_id.startswith(("type:", "select:")) else None
         if plan.action_id in SAFE_ACTIONS:
             return Decision(
                 action_id=plan.action_id,

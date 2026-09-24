@@ -35,7 +35,8 @@ _RULES = """あなたはブラウザを操作して、利用者の依頼を達�
 - 文を入力した後は、その欄の送信・確定のボタン（名前の無いアイコンのボタンを含む）を選ぶ。
 - 依頼への答えがページに出ている、または依頼が済んだら done を選ぶ。
 - ログイン、パスワード、購入や削除などは、依頼に明記されていなければ選ばない。
-- 入力以外を選んだときは text を空にする。"""
+- プルダウン（select:）を選んだら、text に選ぶ選択肢の名前を候補の説明どおりに書く（例: 最安値を探すなら価格の安い順）。
+- 入力と選択以外を選んだときは text を空にする。"""
 
 
 @dataclass(frozen=True)
@@ -117,7 +118,7 @@ class GeminiPlanner:
         if action_id not in {option.id for option in options}:
             logger.warning("候補に無い操作が返りました: %s", action_id)
             return None
-        text = str(data.get("text", "")).strip() if action_id.startswith("type:") else ""
+        text = str(data.get("text", "")).strip() if action_id.startswith(("type:", "select:")) else ""
         return Plan(
             action_id=action_id,
             text=text[:200],

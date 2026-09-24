@@ -47,6 +47,9 @@ class FakeSession:
     async def press_key(self, element_id: str, key: str) -> None:
         self.actions.append(("key", element_id, key))
 
+    async def select(self, element_id: str, choice: str) -> None:
+        self.actions.append(("select", element_id, choice))
+
     async def back(self) -> None:
         self.actions.append(("back",))
 
@@ -972,3 +975,14 @@ def test_ctrl_enter_is_pressed_for_a_ctrl_enter_field() -> None:
     confirm = next(event for event in events if event["event"] == "confirm_request")
     assert "Ctrl+Enter" in confirm["data"]["action"]["description"]
     assert "入力欄がクリア" in events[-1]["data"]["result"]
+
+
+def test_select_action_picks_the_chosen_option() -> None:
+    view = PageView(
+        "https://shop.example/s", "結果", "",
+        (Element("e1", "combobox", "並べ替え", "select", choices=("おすすめ順", "価格の安い順")),),
+    )
+    session = FakeSession(view)
+    _events(_runner(session, [_decision("select:e1", text="価格の安い順"), _decision("done", done=0.9)]))
+
+    assert session.actions[0] == ("select", "e1", "価格の安い順")

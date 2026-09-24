@@ -717,6 +717,11 @@ class BrowserAgentRunner:
         if kind == "click":
             await session.click(element_id)
             return ""
+        if kind == "select":
+            if not text:
+                raise RuntimeError("プルダウンで選ぶ選択肢が決まっていません。")
+            await session.select(element_id, text)
+            return text
         if kind == "key":
             key = send_key(element)
             if key is None:

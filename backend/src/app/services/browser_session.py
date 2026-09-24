@@ -19,6 +19,9 @@ TYPE_DELAY_MS = 20
 # 画面外の要素も読む。クリックと入力は Playwright が要素まで自動でスクロールする。
 # 上限を超えたときは 入力欄 → ボタン類 → リンク の順に残し、出力はページ上の順に戻す。
 # a や button でなくても、onclick・tabindex・指の形のカーソルを持つ div や li は押せる行として読む。
+# プルダウンで選んだ後、ページが移るのを待つ上限（ミリ秒）。移らない選択肢もあるため短くする。
+SELECT_NAVIGATION_MS = 3000
+
 READ_SCRIPT = r"""
 () => {
   const MAX_ELEMENTS = 150;
@@ -40,17 +43,34 @@ READ_SCRIPT = r"""
   const sendHint = /send|submit|送信/i;
   // 名前に「検索」「送信」を含んでも、取り消し・消去のボタンは送信ボタンにしない（「検索語をクリア」など）。
   const undoName = /クリア|消去|削除|取り消|キャンセル|閉じる|\b(clear|cancel|close|reset|delete)\b/i;
-  const EXCERPT_LIMIT = 1500;
+  const EXCERPT_LIMIT = 4000;
   // 長い本文は先頭と末尾を残す。チャットの最新の回答や送信結果は末尾に出る。
-  const EXCERPT_HEAD = 600;
+  const EXCERPT_HEAD = 2500;
   const clean = text => String(text || '').replace(/\s+/g, ' ').trim();
   const clip = (text, limit) => text.length <= limit
     ? text
     : text.slice(0, EXCERPT_HEAD) + ' … ' + text.slice(text.length - (limit - EXCERPT_HEAD - 3));
   // 本文は main があればそこから読む。サイドバーの履歴などで本文の枠が埋まるのを避ける。
+  // main が無いページ（通販の検索結果など）は、ヘッダー・ナビ・フッターのメニューで枠が埋まるため除いて読む。
+  const chrome = 'header, nav, footer, aside, [role="banner"], [role="navigation"], [role="contentinfo"], '
+    + '[role="complementary"], [role="search"], select, script, style, noscript, template';
+  const bodyText = () => {
+    if (!document.body) return '';
+    const copy = document.body.cloneNode(true);
+    const originals = document.body.querySelectorAll('*');
+    const copies = copy.querySelectorAll('*');
+    // 複製では CSS が効かないため、見えない要素は元の要素で確かめて外す。
+    for (let i = originals.length - 1; i >= 0; i--) {
+      const style = getComputedStyle(originals[i]);
+      if (style.display === 'none' || style.visibility === 'hidden') copies[i].remove();
+    }
+    copy.querySelectorAll(chrome).forEach(node => node.remove());
+    for (const block of copy.querySelectorAll('p, div, li, tr, h1, h2, h3, h4, br')) block.append(' ');
+    return clean(copy.textContent);
+  };
   const pageText = () => {
     const main = document.querySelector('main, [role="main"]');
-    return (main && clean(main.innerText)) || clean(document.body && document.body.innerText);
+    return (main && clean(main.innerText)) || bodyText() || clean(document.body && document.body.innerText);
   };
 
   // open な shadow DOM の中も読む。Playwright のロケーターも中まで届く。
@@ -122,7 +142,7 @@ READ_SCRIPT = r"""
         : tag === 'a' ? 'link' : tag === 'button' ? 'button' : tag === 'select' ? 'combobox'
         : el.isContentEditable ? 'textbox' : tag
       );
-      const kind = textLike ? 'type' : 'click';
+      const kind = textLike ? 'type' : tag === 'select' ? 'select' : 'click';
       const labelled = (el.labels && el.labels.length)
         ? Array.from(el.labels).map(node => node.innerText).join(' ')
         : '';
@@ -217,6 +237,9 @@ READ_SCRIPT = r"""
       formId: item.form ? 'f' + (Array.from(document.forms).indexOf(item.form) + 1) : '',
       search: item.search,
       submitId: textLike ? submitFor(item) : '',
+      choices: item.kind === 'select'
+        ? Array.from(el.options).filter(o => !o.disabled).map(o => clean(o.label || o.text)).filter(Boolean).slice(0, 40)
+        : [],
     };
   });
   return {
@@ -313,6 +336,23 @@ class BrowserSession:
         if submit:
             await locator.press("Enter")
             await self._settle()
+
+    async def select(self, element_id: str, choice: str) -> None:
+        """プルダウンで選ぶ。サイトが見た目の部品を重ねていてもクリックせずに選べる。"""
+        before = self._page.url
+        await self._locator(element_id).select_option(label=choice, timeout=8000)
+        # 並べ替えなどは選んだ後にスクリプトでページを移すため、すぐ読むと移る前の一覧を読んでしまう。
+        try:
+            await self._page.wait_for_url(lambda url: url != before, timeout=SELECT_NAVIGATION_MS)
+        except Exception:
+            logger.debug("選択後にページは移りませんでした")
+        else:
+            # 移った直後は一覧を後から描くサイトがあるため、通信が落ち着くまで待つ。広告などで落ち着かないページもあるので上限を置く。
+            try:
+                await self._page.wait_for_load_state("networkidle", timeout=SELECT_NAVIGATION_MS)
+            except Exception:
+                logger.debug("選択後の通信が落ち着く前に読みます")
+        await self._settle()
 
     async def press_key(self, element_id: str, key: str) -> None:
         """入力欄でキーを押す。送信ボタンの無いチャット欄の送信（Enter、Ctrl+Enter など）に使う。"""

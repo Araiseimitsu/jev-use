@@ -234,3 +234,15 @@ def test_send_key_is_read_from_the_fields_hint() -> None:
     assert send_key(field("コメント（Enter で改行）")) is None
     assert send_key(field("Press Enter to send")) == "Enter"
     assert send_key(field("メッセージ")) == "Enter"
+
+
+def test_select_keeps_its_choices_and_is_offered_as_a_choice() -> None:
+    elements = elements_from_raw(
+        [{"id": "e1", "role": "combobox", "name": "並べ替え", "kind": "select",
+          "choices": ["おすすめ順", "価格の安い順", "価格の高い順"]}]
+    )
+
+    assert elements[0].choices == ("おすすめ順", "価格の安い順", "価格の高い順")
+    option = action_catalog(elements)[0]
+    assert option.id == "select:e1"
+    assert "価格の安い順" in option.description

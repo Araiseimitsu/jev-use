@@ -142,7 +142,7 @@ def test_excerpt_reads_main_and_keeps_the_latest_text() -> None:
         view = await session.read()
         assert "過去の会話" not in view.excerpt
         assert answer in view.excerpt
-        assert len(view.excerpt) <= 1500
+        assert len(view.excerpt) <= 4000
 
     _with_page(html, check)
 
@@ -223,5 +223,24 @@ def test_clear_button_is_not_taken_for_the_send_button() -> None:
         by_name = {element.name: element for element in (await session.read()).elements}
         assert by_name["ルームを検索..."].submit_id != by_name["検索語をクリア"].id
         assert by_name["メッセージ"].submit_id == by_name["送信"].id
+
+    _with_page(html, check)
+
+
+def test_excerpt_without_main_skips_header_and_footer() -> None:
+    menu = "".join(f"<a href='#'>カテゴリ{i}</a>" for i in range(200))
+    html = (
+        f"<header>{menu}</header><div><p>Dell XPS 13 ￥31,800</p>"
+        f"<p style='display:none'>隠れた文</p><select><option>価格: 安い順</option></select></div>"
+        f"<footer>{menu}</footer>"
+    )
+
+    async def check(session: BrowserSession, page) -> None:
+        view = await session.read()
+        assert "￥31,800" in view.excerpt
+        assert "カテゴリ" not in view.excerpt
+        assert "隠れた文" not in view.excerpt
+        select = next(element for element in view.elements if element.kind == "select")
+        assert select.choices == ("価格: 安い順",)
 
     _with_page(html, check)

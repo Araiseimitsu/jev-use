@@ -91,3 +91,12 @@ def test_unknown_action_or_failure_gives_no_plan() -> None:
 
 def test_planner_without_key_is_disabled() -> None:
     assert GeminiPlanner(api_key="").enabled is False
+
+
+def test_text_is_kept_for_a_select_choice() -> None:
+    view = PageView("https://shop.example", "結果", "", (Element("e1", "combobox", "並べ替え", "select", choices=("おすすめ順", "価格の安い順")),))
+    planner = GeminiPlanner(api_key="k", model="m")
+    http = _Http({"reason": "安い順に並べる", "action": "select:e1", "text": "価格の安い順"})
+    plan = asyncio.run(planner.plan(http, "最安値を探して", view, action_catalog(view.elements)))  # type: ignore[arg-type]
+
+    assert plan is not None and plan.text == "価格の安い順"

@@ -867,6 +867,55 @@ def test_unsure_done_before_sending_is_not_reported_as_complete() -> None:
     assert done_events[-1]["data"]["result"] == "晴れ、25度"
 
 
+def test_gemini_question_waits_for_finished_reply(monkeypatch) -> None:
+    monkeypatch.setattr("app.services.browser_agent.REPLY_STABLE_SECONDS", 0)
+
+    class GeminiPage(FakeSession):
+        async def fill(self, element_id: str, text: str, submit: bool) -> None:
+            await super().fill(element_id, text, submit)
+            self.view = PageView(self.view.url, self.view.title, "質問", (
+                Element("e1", "textarea", "質問", "type", filled=True, submit_id="e2"),
+                Element("e2", "button", "送信", "click"),
+            ))
+
+        async def click(self, element_id: str) -> None:
+            await super().click(element_id)
+            self.view = PageView(self.view.url, self.view.title, "質問", (), reply="前の回答")
+
+        async def wait(self) -> None:
+            await super().wait()
+            waits = sum(action[0] == "wait" for action in self.actions)
+            if waits == 2:
+                self.view = PageView(self.view.url, self.view.title, "質問", (), reply="新しい答えの途中", reply_busy=True)
+            elif waits >= 3:
+                self.view = PageView(self.view.url, self.view.title, "質問と回答", (), reply="新しい答えの全文")
+
+    class RecordingWriter(FakeWriter):
+        async def summary(self, client: object, task: str, url: str, title: str, excerpt: str) -> str:
+            assert excerpt == "新しい答えの全文"
+            return excerpt
+
+    session = GeminiPage(PageView("https://gemini.google.com/app", "Gemini", "", (
+        Element("e1", "textarea", "質問", "type", submit_id="e2"),
+        Element("e2", "button", "送信", "click", disabled=True),
+    ), reply="前の回答"))
+    runner = BrowserAgentRunner(
+        task="https://gemini.google.com/app で質問をして返答を教えて",
+        max_steps=5,
+        headless=True,
+        decider=ScriptedDecider([_decision("type:e1", text="質問"), _decision("done")]),  # type: ignore[arg-type]
+        writer=RecordingWriter(),  # type: ignore[arg-type]
+        session_factory=lambda: session,
+    )
+
+    events = _approved_events(runner)
+
+    assert runner._expects_reply
+    assert session.actions.count(("click", "e2")) == 1
+    assert sum(action[0] == "wait" for action in session.actions) >= 3
+    assert events[-1]["data"]["result"] == "新しい答えの全文"
+
+
 def _form_view(name: bool = False, email: bool = False, body: bool = False) -> PageView:
     return PageView("https://example.com/contact", "お問い合わせ", "", (
         Element("e1", "input", "お名前", "type", filled=name, form_id="f1", submit_id="e4"),

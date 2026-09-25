@@ -3,6 +3,7 @@ __pycache__/
 *.py[cod]
 .venv/
 .pytest_cache/
+*.log
 
 # 環境変数（秘密情報）
 .env

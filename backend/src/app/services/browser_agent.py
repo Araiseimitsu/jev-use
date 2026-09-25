@@ -50,6 +50,9 @@ SUBMIT_END = re.compile(
 
 # ページに答えが揃ったとみなす done の確率
 DONE_THRESHOLD = 0.75
+# 生成が止まったことを確認するため、最後の回答が連続して変わらない時間。
+REPLY_STABLE_SECONDS = 3.0
+REPLY_TIMEOUT_SECONDS = 90.0
 # 同じページで同じ操作をこの回数選んだら止める。連続していなくても数える（A→B→A→B→A も止める）。
 REPEAT_LIMIT = 3
 # 「人間ですか？」の画面を見にいく間隔（秒）
@@ -126,6 +129,9 @@ class BrowserAgentRunner:
         self._ends_with_submit = bool(
             submit_instruction and not prefix.endswith(("do not", "don't", "never", "without"))
         )
+        self._expects_reply = bool(re.search(r"(?:返答|回答|返事|答え).{0,8}(?:教えて|見せて|伝えて|要約して)", self.task))
+        if self._expects_reply:
+            self._ends_with_submit = True
         self._submit_waits = 0
         # 送信操作をして、確認画面など次のページへ進んだか。進んだ後は done で終えてよい。
         self._submitted = False
@@ -367,6 +373,11 @@ class BrowserAgentRunner:
                     raise SubmissionNotConfirmed(
                         "送信操作でエラーが発生し、完了を確認できませんでした。自動再送信はしていません。"
                     )
+                if self._expects_reply and "gemini.google.com" in view.url:
+                    reply = await self._wait_for_reply(emit, session, view, step)
+                    return await self.writer.summary(
+                        client, self.task_for_model(), view.url, view.title, reply
+                    ), step
                 outcome = await self._verify_submission(emit, session, view, submit[1], step)
                 if outcome is not None:
                     return outcome, step
@@ -377,6 +388,26 @@ class BrowserAgentRunner:
             client, self.task_for_model(), view.url, view.title, view.excerpt
         )
         return f"最大ステップ数（{self.max_steps}）に達しました。\n{summary}", step
+
+    async def _wait_for_reply(self, emit: Emit, session: Any, before: PageView, step: int) -> str:
+        """Gemini への送信後、新しい回答が現れて生成が落ち着くまで待つ。"""
+        deadline = time.monotonic() + REPLY_TIMEOUT_SECONDS
+        last_reply = ""
+        stable_since = 0.0
+        while time.monotonic() < deadline:
+            if self.is_stop_requested():
+                raise SubmissionNotConfirmed("ユーザーの操作で停止しました。")
+            await session.wait()
+            after = await session.read()
+            self._emit_observation(emit, step, after)
+            reply = after.reply.strip()
+            if reply and reply != before.reply.strip():
+                if reply != last_reply:
+                    last_reply = reply
+                    stable_since = time.monotonic()
+                if not after.reply_busy and time.monotonic() - stable_since >= REPLY_STABLE_SECONDS:
+                    return reply
+        raise SubmissionNotConfirmed("Gemini の新しい返答を確認できませんでした。送信を繰り返していません。")
 
     def _submit_after_input(self, view: PageView) -> tuple[Decision, frozenset[tuple[str, str]]] | None:
         """送信が依頼されていて、入力した欄を送れる状態なら次の送信操作と、送信後に空くはずの欄を返す。

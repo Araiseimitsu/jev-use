@@ -100,6 +100,8 @@ class PageView:
     excerpt: str
     elements: tuple[Element, ...]
     feedback: str = ""
+    reply: str = ""
+    reply_busy: bool = False
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -198,6 +200,8 @@ def page_view_from_raw(raw: object) -> PageView:
         excerpt=excerpt[:4000],
         elements=elements_from_raw(data.get("elements")),
         feedback=str(data.get("feedback", ""))[:300],
+        reply=str(data.get("reply", ""))[:4000].strip(),
+        reply_busy=bool(data.get("replyBusy", False)),
     )
 
 

@@ -250,6 +250,10 @@ READ_SCRIPT = r"""
     url: location.href,
     title: document.title || '',
     excerpt: clip(pageText(), EXCERPT_LIMIT),
+    // Gemini の回答だけを読む。質問の反映や入力欄のクリアを回答完了と誤認しない。
+    reply: clip(clean(Array.from(document.querySelectorAll('model-response'))
+      .filter(visible).at(-1)?.innerText), EXCERPT_LIMIT),
+    replyBusy: Boolean(document.querySelector('button[aria-label*="Stop response"], button[aria-label*="応答を停止"], button[aria-label*="生成を停止"], [aria-busy="true"]')),
     feedback: clean(Array.from(document.querySelectorAll(
       '[role="status"], [role="alert"], [aria-live="polite"], [aria-live="assertive"]'
     )).filter(visible).map(el => el.innerText).join(' ')).slice(0, 300),

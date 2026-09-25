@@ -148,6 +148,27 @@ def test_excerpt_reads_main_and_keeps_the_latest_text() -> None:
     _with_page(html, check)
 
 
+def test_read_separates_latest_gemini_reply_from_question() -> None:
+    html = (
+        '<main><p>送信した質問</p>'
+        '<model-response>以前の回答</model-response>'
+        '<model-response aria-busy="true">新しい回答の途中</model-response></main>'
+    )
+
+    async def check(session: BrowserSession, page) -> None:
+        view = await session.read()
+        assert view.reply == "新しい回答の途中"
+        assert view.reply_busy is True
+        await page.locator("model-response").last.evaluate(
+            "el => { el.textContent = '新しい回答の全文'; el.removeAttribute('aria-busy'); }"
+        )
+        view = await session.read()
+        assert view.reply == "新しい回答の全文"
+        assert view.reply_busy is False
+
+    _with_page(html, check)
+
+
 def test_read_finds_clickable_rows_without_link_or_button_tags() -> None:
     """div や li で作られた一覧の行も、押せる見た目や onclick があれば候補にする。"""
     html = (

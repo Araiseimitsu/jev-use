@@ -876,7 +876,7 @@ def test_gemini_question_waits_for_finished_reply(monkeypatch) -> None:
             self.view = PageView(self.view.url, self.view.title, "質問", (
                 Element("e1", "textarea", "質問", "type", filled=True, submit_id="e2"),
                 Element("e2", "button", "送信", "click"),
-            ))
+            ), reply="前の回答")
 
         async def click(self, element_id: str) -> None:
             await super().click(element_id)

@@ -12,6 +12,7 @@ import time
 from collections.abc import AsyncGenerator, Callable
 from dataclasses import replace
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
@@ -373,7 +374,7 @@ class BrowserAgentRunner:
                     raise SubmissionNotConfirmed(
                         "送信操作でエラーが発生し、完了を確認できませんでした。自動再送信はしていません。"
                     )
-                if self._expects_reply and "gemini.google.com" in view.url:
+                if self._expects_reply and urlparse(view.url).hostname == "gemini.google.com":
                     reply = await self._wait_for_reply(emit, session, view, step)
                     return await self.writer.summary(
                         client, self.task_for_model(), view.url, view.title, reply

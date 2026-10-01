@@ -4,13 +4,20 @@
 """
 
 import base64
+import json
 import logging
+from pathlib import Path
 from typing import Any
 
 from app.core.config import settings
 from app.services.page_state import PageView, page_view_from_raw
 
 logger = logging.getLogger(__name__)
+
+# ログイン維持のクッキーを残すファイル名（プロフィール直下。Git 管理外）
+STATE_FILE = "state.json"
+# Chrome が入っていないときに Playwright が出すエラーの目印
+CHROME_MISSING_HINTS = ("is not found", "Executable doesn't exist")
 
 # 打ち直すときの 1 文字ごとの間隔（ミリ秒）
 TYPE_DELAY_MS = 20
@@ -286,6 +293,7 @@ class BrowserSession:
             self._playwright = await manager.start()
             context = await self._open_context()
             self._browser = context
+            await self._restore_cookies(context)
             page = context.pages[0] if context.pages else await context.new_page()
             self._page = page
             await page.goto(url, wait_until="domcontentloaded", timeout=30000)
@@ -308,12 +316,40 @@ class BrowserSession:
             "headless": self.headless,
             "viewport": {"width": 1280, "height": 800},
             "locale": "ja-JP",
+            # 人が一度通した確認を、自動操作の目印だけで再び出させないための設定。確認自体は通さない。
+            "ignore_default_args": ["--enable-automation"],
+            "args": ["--disable-blink-features=AutomationControlled"],
         }
         try:
             return await self._playwright.chromium.launch_persistent_context(channel="chrome", **options)
-        except Exception:
-            logger.info("Google Chrome が見つからないため、Playwright の Chromium を使います")
+        except Exception as e:
+            # 起動の失敗（プロフィールのロックなど）まで Chromium に切り替えると、原因が隠れ指紋も変わる。
+            if not any(hint in str(e) for hint in CHROME_MISSING_HINTS):
+                raise
+            logger.warning("Google Chrome が見つからないため、Playwright の Chromium を使います")
             return await self._playwright.chromium.launch_persistent_context(**options)
+
+    @property
+    def _state_path(self) -> Path:
+        return settings.browser_profile_dir / STATE_FILE
+
+    async def _restore_cookies(self, context: Any) -> None:
+        """前回の終了時に保存したクッキーを戻す。有効期限の無いログイン維持用クッキーは、閉じるとプロフィールから消えるため。"""
+        try:
+            cookies = json.loads(self._state_path.read_text(encoding="utf-8")).get("cookies", [])
+            if cookies:
+                await context.add_cookies(cookies)
+        except FileNotFoundError:
+            pass
+        except Exception:
+            # 壊れた保存は無視して、ログインし直しにする。中身はログインに関わるため出さない。
+            logger.warning("保存したクッキーを読み込めませんでした", exc_info=False)
+
+    async def _save_cookies(self, context: Any) -> None:
+        try:
+            await context.storage_state(path=str(self._state_path))
+        except Exception:
+            logger.warning("クッキーを保存できませんでした", exc_info=False)
 
     async def peek(self) -> str:
         """ページの中身を読まず、いまのアドレスだけを返す。"""
@@ -401,6 +437,7 @@ class BrowserSession:
         # 利用者がウィンドウを閉じた後などは close が失敗する。Playwright の停止は必ず行う。
         try:
             if browser is not None:
+                await self._save_cookies(browser)
                 await browser.close()
         except Exception:
             logger.warning("ブラウザを閉じられませんでした", exc_info=True)

@@ -292,3 +292,103 @@ def test_select_uses_original_index_and_checks_stale_options() -> None:
         assert await page.locator("select").input_value() == "r46"
 
     _with_page(html, check)
+
+
+class _FakeContext:
+    def __init__(self, state: dict | None = None) -> None:
+        self.cookies_added: list = []
+        self.saved_to: str | None = None
+        self.closed = False
+        self.pages: list = []
+
+    async def add_cookies(self, cookies: list) -> None:
+        self.cookies_added.extend(cookies)
+
+    async def storage_state(self, path: str) -> None:
+        self.saved_to = path
+        with open(path, "w", encoding="utf-8") as f:
+            f.write('{"cookies": [{"name": "sid"}], "origins": []}')
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+class _FakeChromium:
+    def __init__(self, errors: dict[str, Exception]) -> None:
+        self.errors = errors
+        self.calls: list[dict] = []
+        self.context = _FakeContext()
+
+    async def launch_persistent_context(self, **kwargs):
+        self.calls.append(kwargs)
+        error = self.errors.get(kwargs.get("channel", "chromium"))
+        if error:
+            raise error
+        return self.context
+
+
+class _FakePlaywright:
+    def __init__(self, chromium: _FakeChromium) -> None:
+        self.chromium = chromium
+
+    async def stop(self) -> None:
+        pass
+
+
+@pytest.fixture
+def profile_dir(tmp_path, monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "browser_profile_dir", tmp_path / "profile")
+    return tmp_path / "profile"
+
+
+def _session_with(chromium: _FakeChromium) -> BrowserSession:
+    session = BrowserSession(headless=True)
+    session._playwright = _FakePlaywright(chromium)
+    return session
+
+
+def test_context_hides_automation_flag_and_prefers_chrome(profile_dir) -> None:
+    chromium = _FakeChromium({})
+    asyncio.run(_session_with(chromium)._open_context())
+    options = chromium.calls[0]
+    assert options["channel"] == "chrome"
+    assert options["ignore_default_args"] == ["--enable-automation"]
+    assert "--disable-blink-features=AutomationControlled" in options["args"]
+
+
+def test_falls_back_to_chromium_only_when_chrome_is_missing(profile_dir) -> None:
+    missing = _FakeChromium({"chrome": RuntimeError("Chromium distribution 'chrome' is not found at C:/x")})
+    asyncio.run(_session_with(missing)._open_context())
+    assert [call.get("channel") for call in missing.calls] == ["chrome", None]
+
+    broken = _FakeChromium({"chrome": RuntimeError("profile is locked")})
+    with pytest.raises(RuntimeError, match="profile is locked"):
+        asyncio.run(_session_with(broken)._open_context())
+    assert len(broken.calls) == 1
+
+
+def test_session_cookies_are_saved_on_close_and_restored(profile_dir) -> None:
+    chromium = _FakeChromium({})
+    first = _session_with(chromium)
+    profile_dir.mkdir(parents=True)  # 実際は起動時に作られる
+    first._browser = chromium.context
+    asyncio.run(first.close())
+    assert chromium.context.closed is True
+    assert (profile_dir / "state.json").exists()
+
+    second_chromium = _FakeChromium({})
+    second = _session_with(second_chromium)
+    asyncio.run(second._restore_cookies(second_chromium.context))
+    assert second_chromium.context.cookies_added == [{"name": "sid"}]
+
+
+def test_restore_ignores_missing_or_broken_state(profile_dir) -> None:
+    context = _FakeContext()
+    session = BrowserSession(headless=True)
+    asyncio.run(session._restore_cookies(context))
+    profile_dir.mkdir(parents=True)
+    (profile_dir / "state.json").write_text("{broken", encoding="utf-8")
+    asyncio.run(session._restore_cookies(context))
+    assert context.cookies_added == []

@@ -1,39 +1,45 @@
 import { getJson, postJson, postSseStream } from "./api.js";
+import { setMood, startMascot } from "./mascot.js";
+import { startScene } from "./scene.js";
 
-const systemStatus = document.querySelector("#system-status");
-const form = document.querySelector("#task-form");
-const taskInput = document.querySelector("#task-input");
-const clearBtn = document.querySelector("#clear-btn");
-const runBtn = document.querySelector("#run-btn");
-const stopBtn = document.querySelector("#stop-btn");
-const headlessToggle = document.querySelector("#headless-toggle");
-const confirmNote = document.querySelector("#confirm");
-const formNote = document.querySelector("#form-note");
-const run = document.querySelector("#run");
-const pageLine = document.querySelector("#page-line");
-const humanCheck = document.querySelector("#human-check");
-const userInput = document.querySelector("#user-input");
-const humanReadyBtn = document.querySelector("#human-ready-btn");
-const preview = document.querySelector("#preview");
-const previewOpen = document.querySelector("#preview-open");
-const previewDialog = document.querySelector("#preview-dialog");
-const previewFull = document.querySelector("#preview-full");
-const previewClose = document.querySelector("#preview-close");
-const steps = document.querySelector("#steps");
-const approval = document.querySelector("#approval");
-const approvalText = document.querySelector("#approval-text");
-const approveBtn = document.querySelector("#approve-btn");
-const denyBtn = document.querySelector("#deny-btn");
-const result = document.querySelector("#result");
-const resultText = document.querySelector("#result-text");
-const copyBtn = document.querySelector("#copy-btn");
-const greeting = document.querySelector("#greeting");
-const greetingSub = document.querySelector("#greeting-sub");
-const themeMeta = document.querySelector('meta[name="theme-color"]');
-const recentHistory = document.querySelector("#recent-history");
-const historyList = document.querySelector("#history-list");
+const $ = (selector) => document.querySelector(selector);
+const systemStatus = $("#system-status");
+const browser = $("#browser");
+const form = $("#task-form");
+const taskInput = $("#task-input");
+const clearBtn = $("#clear-btn");
+const runBtn = $("#run-btn");
+const stopBtn = $("#stop-btn");
+const headlessToggle = $("#headless-toggle");
+const confirmNote = $("#confirm");
+const formNote = $("#form-note");
+const tabTitle = $("#tab-title");
+const home = $("#home");
+const homeEmpty = $("#home-empty");
+const historyList = $("#history-list");
+const run = $("#run");
+const pageLine = $("#page-line");
+const pause = $("#pause");
+const humanCheck = $("#human-check");
+const userInput = $("#user-input");
+const humanReadyBtn = $("#human-ready-btn");
+const preview = $("#preview");
+const previewOpen = $("#preview-open");
+const previewDialog = $("#preview-dialog");
+const previewFull = $("#preview-full");
+const previewClose = $("#preview-close");
+const log = $("#log");
+const steps = $("#steps");
+const approval = $("#approval");
+const approvalText = $("#approval-text");
+const approveBtn = $("#approve-btn");
+const denyBtn = $("#deny-btn");
+const result = $("#result");
+const resultText = $("#result-text");
+const copyBtn = $("#copy-btn");
+const newBtn = $("#new-btn");
 const HISTORY_KEY = "jev-use:recent-tasks";
-const HISTORY_LIMIT = 5;
+const HISTORY_LIMIT = 6;
 
 let runId = "";
 let acceptedTask = "";
@@ -53,18 +59,31 @@ function loadRecentTasks() {
   }
 }
 
+// 文字列から色相を決め、履歴のサムネイルを依頼ごとに見分けやすくする
+function hueOf(text) {
+  let hash = 0;
+  for (const ch of text) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
+  return hash % 360;
+}
+
 function renderRecentTasks() {
-  recentHistory.hidden = recentTasks.length === 0;
+  homeEmpty.hidden = recentTasks.length > 0;
   historyList.replaceChildren();
   for (const task of recentTasks) {
     const item = document.createElement("li");
     const button = document.createElement("button");
     button.type = "button";
-    button.textContent = task;
+    button.title = "この依頼を入力欄に入れる";
+    const thumb = document.createElement("span");
+    thumb.className = "thumb";
+    thumb.style.setProperty("--h", hueOf(task));
+    const text = document.createElement("span");
+    text.className = "text";
+    text.textContent = task;
+    button.append(thumb, text);
     button.addEventListener("click", () => {
       taskInput.value = task;
       resetConfirmation();
-      recentHistory.open = false;
       taskInput.focus();
     });
     item.append(button);
@@ -82,21 +101,29 @@ function saveRecentTask(task) {
   renderRecentTasks();
 }
 
-// 文言から状態を決め、ステータスドットの色・動きを切り替える
+// 文言から状態を決め、ステータス表示とマスコットの表情を切り替える
 const STATUS_STATE = {
-  "準備完了": "ready",
-  "API キーが未設定です": "warn",
-  "接続できません": "error",
-  "実行中": "running",
-  "確認待ち": "waiting",
-  "入力待ち": "waiting",
-  "完了": "done",
-  "停止": "error",
+  "準備完了": ["ready", "idle"],
+  "API キーが未設定です": ["warn", "error"],
+  "接続できません": ["error", "error"],
+  "実行中": ["running", "running"],
+  "確認待ち": ["waiting", "waiting"],
+  "入力待ち": ["waiting", "waiting"],
+  "完了": ["done", "done"],
+  "停止": ["error", "error"],
 };
 
-function setStatus(text) {
-  systemStatus.dataset.state = STATUS_STATE[text] || "ready";
+function setStatus(text, line) {
+  const [state, mood] = STATUS_STATE[text] || ["ready", "idle"];
+  systemStatus.dataset.state = state;
   systemStatus.textContent = text;
+  browser.dataset.mode = state === "running" ? "running" : state;
+  setMood(mood, line);
+}
+
+function showNote(message) {
+  formNote.textContent = message;
+  formNote.hidden = !message;
 }
 
 async function init() {
@@ -104,9 +131,13 @@ async function init() {
     const config = await getJson("/config");
     headless = Boolean(config.headless);
     headlessToggle.checked = headless;
-    setStatus(config.typesafe_enabled && config.text_enabled ? "準備完了" : "API キーが未設定です");
+    if (config.typesafe_enabled && config.text_enabled) {
+      setStatus("準備完了");
+    } else {
+      setStatus("API キーが未設定です", "backend/.env に API キーを入れてください");
+    }
   } catch {
-    setStatus("接続できません");
+    setStatus("接続できません", "サーバーが起動しているか確かめてください");
   }
 }
 
@@ -141,11 +172,12 @@ form.addEventListener("submit", async (event) => {
   event.preventDefault();
   const task = taskInput.value.trim();
   if (!task || runBtn.disabled) return;
-  formNote.textContent = "";
+  showNote("");
 
   if (acceptedTask !== task) {
     runBtn.disabled = true;
     runBtn.textContent = "確認しています";
+    setMood("thinking");
     try {
       const assessment = await postJson("/browser/assess", { task });
       if (assessment.requires_confirmation) {
@@ -153,14 +185,16 @@ form.addEventListener("submit", async (event) => {
         confirmNote.textContent = `${(assessment.reasons || []).join(" ")}（このまま Enter で実行）`;
         acceptedTask = task;
         runBtn.textContent = "確認して実行";
+        setMood("waiting", "念のため確認してください");
         // ボタン無効化でフォーカスが外れても、続けて Enter で実行できるよう入力欄へ戻す
         runBtn.disabled = false;
         taskInput.focus();
         return;
       }
     } catch (error) {
-      formNote.textContent = error.message;
+      showNote(error.message);
       runBtn.textContent = "実行する";
+      setMood("error");
       return;
     } finally {
       runBtn.disabled = false;
@@ -174,12 +208,17 @@ async function startRun(task) {
   saveRecentTask(task);
   taskInput.value = "";
   resetConfirmation();
+  document.body.classList.add("running");
+  home.hidden = true;
   run.hidden = false;
+  log.hidden = false;
   result.hidden = true;
   approval.hidden = true;
+  pause.hidden = true;
   previewOpen.hidden = true;
   if (previewDialog.open) previewDialog.close();
   steps.replaceChildren();
+  tabTitle.textContent = task;
   pageLine.textContent = "ページを開いています";
   runBtn.disabled = true;
   runBtn.textContent = "実行中";
@@ -192,8 +231,8 @@ async function startRun(task) {
     { task, headless },
     onEvent,
     (error) => {
-      formNote.textContent = error.message;
-      if (!steps.childElementCount) run.hidden = true;
+      showNote(error.message);
+      if (!steps.childElementCount) backToHome();
       finish("準備完了");
     },
     abortController.signal,
@@ -207,7 +246,8 @@ function onEvent(event) {
     runId = data.run_id || "";
     pageLine.textContent = data.start_url || "";
   } else if (event.event === "observation") {
-    pageLine.textContent = data.title ? `${data.title} — ${data.url}` : data.url || "";
+    pageLine.textContent = data.url || "";
+    if (data.title) tabTitle.textContent = data.title;
   } else if (event.event === "screenshot" && data.image) {
     preview.src = `data:image/jpeg;base64,${data.image}`;
     previewFull.src = preview.src;
@@ -221,14 +261,14 @@ function onEvent(event) {
   } else if (event.event === "confirm_request") {
     approval.hidden = false;
     approvalText.textContent = data.reason || "この操作を実行しますか？";
-    setStatus("確認待ち");
+    setStatus("確認待ち", "この操作、進めていいですか？");
   } else if (event.event === "complete") {
     showResult(data.result || "");
     setStatus("完了");
   } else if (event.event === "error") {
     const message = data.message || "実行できませんでした。";
     showResult(message);
-    formNote.textContent = message;
+    showNote(message);
     setStatus("停止");
   }
 }
@@ -242,13 +282,13 @@ previewDialog.addEventListener("click", (event) => {
 function showResult(text) {
   result.hidden = false;
   resultText.textContent = text;
-  result.scrollIntoView({ block: "nearest" });
 }
 
 function appendStep(data) {
   const action = data.action || {};
   const jev = data.jev || {};
   const item = document.createElement("li");
+  if (data.error) item.className = "failed";
   const title = document.createElement("strong");
   title.textContent = action.text
     ? `${action.description}（${action.text}）`
@@ -257,19 +297,35 @@ function appendStep(data) {
   const bits = [];
   // 次の操作は Gemini が選び、選んだ理由を返す。Jev は危険度だけを判定する。
   if (jev.reason) bits.push(jev.reason);
-  if (typeof jev.risk_probability === "number") bits.push(`危険度 ${Math.round(jev.risk_probability * 100)}%`);
   if (typeof jev.latency_ms === "number") bits.push(`${jev.latency_ms}ms`);
   if (data.error) bits.push(data.error);
   meta.textContent = bits.join("  ");
   item.append(title, meta);
+
+  if (typeof jev.risk_probability === "number") {
+    const percent = Math.round(jev.risk_probability * 100);
+    const risk = document.createElement("span");
+    risk.className = "risk";
+    risk.dataset.level = percent >= 70 ? "high" : percent >= 35 ? "mid" : "low";
+    risk.title = `危険度 ${percent}%`;
+    risk.setAttribute("aria-label", risk.title);
+    const bar = document.createElement("i");
+    bar.style.width = `${Math.max(percent, 3)}%`;
+    risk.append(bar);
+    item.append(risk);
+  }
+
   steps.append(item);
+  item.scrollIntoView({ block: "nearest", behavior: "smooth" });
 }
 
 function showPause(messageEl, data, buttonLabel, waitingStatus) {
   const active = Boolean(data.active);
+  pause.hidden = !active;
+  humanCheck.hidden = true;
+  userInput.hidden = true;
   messageEl.hidden = !active;
   messageEl.textContent = data.message || "";
-  humanReadyBtn.hidden = !active;
   humanReadyBtn.textContent = buttonLabel;
   setStatus(active ? waitingStatus : "実行中");
 }
@@ -279,21 +335,36 @@ function finish(status) {
   runBtn.textContent = "実行する";
   stopBtn.hidden = true;
   approval.hidden = true;
-  humanCheck.hidden = true;
-  userInput.hidden = true;
-  humanReadyBtn.hidden = true;
+  pause.hidden = true;
   humanReadyBtn.textContent = "確認できた";
-  if (result.hidden && !steps.childElementCount) run.hidden = true;
+  if (result.hidden && !steps.childElementCount) backToHome();
   if (systemStatus.textContent === "実行中") setStatus(status);
   abortController = null;
 }
+
+// 結果を閉じて、新しいタブの画面に戻す
+function backToHome() {
+  document.body.classList.remove("running");
+  run.hidden = true;
+  log.hidden = true;
+  home.hidden = false;
+  tabTitle.textContent = "新しいタブ";
+  pageLine.textContent = "待機中";
+}
+
+newBtn.addEventListener("click", () => {
+  backToHome();
+  showNote("");
+  if (!abortController) setStatus("準備完了");
+  taskInput.focus();
+});
 
 // 停止要求を出してから受信を切る。受信を切っても、サーバー側はブラウザを閉じてから終わる。
 stopBtn.addEventListener("click", async () => {
   if (runId) await postJson(`/browser/stop/${runId}`, {}).catch(() => {});
   abortController?.abort();
   showResult("停止しました。");
-  setStatus("停止");
+  setStatus("停止", "止めました");
 });
 
 humanReadyBtn.addEventListener("click", async () => {
@@ -302,7 +373,7 @@ humanReadyBtn.addEventListener("click", async () => {
   try {
     await postJson(`/browser/human-ready/${runId}`, {});
   } catch (error) {
-    formNote.textContent = error.message;
+    showNote(error.message);
   } finally {
     humanReadyBtn.disabled = false;
   }
@@ -320,7 +391,7 @@ async function respondApproval(granted) {
     approval.hidden = true;
     setStatus("実行中");
   } catch (error) {
-    formNote.textContent = error.message;
+    showNote(error.message);
   } finally {
     approveBtn.disabled = false;
     denyBtn.disabled = false;
@@ -335,93 +406,11 @@ copyBtn.addEventListener("click", async () => {
       copyBtn.textContent = "コピー";
     }, 1600);
   } catch {
-    formNote.textContent = "コピーできませんでした。";
+    showNote("コピーできませんでした。");
   }
 });
 
+startScene();
+startMascot();
 renderRecentTasks();
 init();
-
-// 毎日開いたときに少し表情が変わるよう、時間帯で挨拶とテーマを切り替える。
-// 言葉は当日中ずっと同じものが選ばれ、日付が変わると別の候補から選ばれる。
-const PERIODS = [
-  {
-    key: "night",
-    ranges: [[19, 24], [0, 5]],
-    meta: "#161c2d",
-    hello: ["こんばんは 🌙", "まだ起きてるんですね 🌙", "静かな時間ですね 🌙", "おつかれさま、今日もお疲れさまでした 🌙"],
-    lines: [
-      "深追いはほどほどに、目は大事に。",
-      "眠る前の調べものは、明日の自分への手紙。",
-      "今日の分はもう取り分終わった、と自分に言い訳するのも自由です。",
-      "夜こそはやることが進む、昔から研究室の定説です。",
-    ],
-  },
-  {
-    key: "morning",
-    ranges: [[5, 11]],
-    meta: "#f2f9fd",
-    hello: ["おはようございます ☀️", "朝から元気ですね ☀️", "いい朝ですね ☀️"],
-    lines: [
-      "今日もいい一日を。",
-      "最初の一歩は今日もうまくいくはず。",
-      "コーヒーかお茶か、それも大事な選択。",
-    ],
-  },
-  {
-    key: "day",
-    ranges: [[11, 17]],
-    meta: "#fff8f0",
-    hello: ["こんにちは 🌤️", "おつかれさま 🌤️", "昼過ぎてますね 🌤️"],
-    lines: [
-      "詰め込みすぎに注意。",
-      "そろそろ一杯水を飲む時間です。",
-      "背筋を伸ばすと調べものの精度も上がります（体感）。",
-    ],
-  },
-  {
-    key: "evening",
-    ranges: [[17, 19]],
-    meta: "#fff5ee",
-    hello: ["おつかれさまです 🌇", "いい夕方ですね 🌇", "そろそろ帰りの時間 🌇"],
-    lines: [
-      "夕飯はちゃんと食べますよね？",
-      "今日やれた分だけ、今日の分は満点。",
-      "そろそろ日中のノイズを捨てる時間です。",
-    ],
-  },
-];
-
-// 日付ごとに異なる候補を選ぶだけの軽いハッシュ
-function daySeed(now) {
-  const key = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}`;
-  let hash = 0;
-  for (const ch of key) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
-  return hash;
-}
-
-function periodOf(hour) {
-  return PERIODS.find(({ ranges }) => ranges.some(([start, end]) => hour >= start && hour < end));
-}
-
-let currentPeriod = null;
-
-function applyTime() {
-  const now = new Date();
-  const period = periodOf(now.getHours());
-  if (period.key !== currentPeriod) {
-    document.documentElement.dataset.time = period.key;
-    themeMeta.setAttribute("content", period.meta);
-    currentPeriod = period.key;
-  }
-
-  const date = now.toLocaleDateString("ja-JP", { month: "long", day: "numeric", weekday: "short" });
-  const { hello, lines } = period;
-  const pick = (candidates, offset) => candidates[(daySeed(now) + offset) % candidates.length];
-  greeting.textContent = `${date}　${pick(hello, 0)}`;
-  greetingSub.textContent = pick(lines, 1);
-}
-
-applyTime();
-// 1分ごとに時間帯が変わったかだけ見る。実行中レイアウトでも邪魔にはならない。
-setInterval(applyTime, 60_000);

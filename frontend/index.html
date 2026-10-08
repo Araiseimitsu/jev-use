@@ -7,69 +7,179 @@
     <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
     <link rel="alternate icon" href="/icons/icon-192.png" type="image/png" sizes="192x192" />
     <link rel="apple-touch-icon" href="/icons/icon-180.png" />
-    <meta name="theme-color" content="#fff8f0" />
+    <meta name="theme-color" content="#8fd0f2" />
+    <!-- フォントが読めない環境でもシステムの丸ゴシックで崩れないよう、読み込みは任意扱い -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Dela+Gothic+One&family=Zen+Maru+Gothic:wght@500;700;900&display=swap"
+    />
+    <link rel="stylesheet" href="/styles/scene.css" />
     <link rel="stylesheet" href="/styles/base.css" />
   </head>
   <body>
+    <!-- 背景の空。時刻に合わせて scene.js が太陽・月・色を動かす -->
+    <div class="sky" aria-hidden="true">
+      <div class="sky-glow"></div>
+      <div class="stars"></div>
+      <div class="sky-body" id="sky-body"><span class="sun"></span><span class="moon"></span></div>
+      <div class="cloud c1"></div>
+      <div class="cloud c2"></div>
+      <div class="cloud c3"></div>
+      <svg class="skyline" viewBox="0 0 1440 260" preserveAspectRatio="none">
+        <path class="hill back" d="M0 170 C 180 110 320 150 480 120 S 820 70 1000 120 S 1300 100 1440 130 V260 H0Z" />
+        <g class="town">
+          <rect x="120" y="150" width="46" height="110" /><rect x="176" y="118" width="34" height="142" />
+          <rect x="216" y="168" width="58" height="92" /><rect x="300" y="132" width="40" height="128" />
+          <rect x="980" y="140" width="52" height="120" /><rect x="1040" y="104" width="30" height="156" />
+          <rect x="1078" y="160" width="64" height="100" /><rect x="1160" y="128" width="38" height="132" />
+          <rect x="1206" y="176" width="70" height="84" />
+        </g>
+        <g class="windows" id="town-windows"></g>
+        <path class="hill front" d="M0 210 C 240 170 420 230 700 200 S 1180 170 1440 205 V260 H0Z" />
+      </svg>
+    </div>
+
     <header class="top">
-      <a class="brand" href="/">jev-use</a>
-      <div class="header-right">
-        <label class="toggle" title="ブラウザを表示せずに動かす">
-          <input type="checkbox" id="headless-toggle" />
-          <span>ヘッドレス</span>
-        </label>
-        <p id="system-status" data-state="loading">接続確認中</p>
-      </div>
+      <a class="brand" href="/"><img src="/icons/icon.svg" alt="" width="28" height="28" />jev-use</a>
+      <p id="system-status" class="status" data-state="loading">接続確認中</p>
     </header>
 
     <main>
-      <p id="greeting" class="greeting"></p>
-      <p id="greeting-sub" class="greeting-sub"></p>
-      <h1>ブラウザに調べものを任せる</h1>
-
-      <form id="task-form">
-        <div class="input-wrap">
-          <textarea
-            id="task-input"
-            rows="2"
-            placeholder="ブラウザで実行したいことを入力"
-            autofocus
-          ></textarea>
-          <button type="button" id="clear-btn" class="clear-btn" title="入力をクリア" aria-label="入力をクリア" hidden>×</button>
-        </div>
-        <details id="recent-history" class="recent-history" hidden>
-          <summary>最近の履歴</summary>
-          <ul id="history-list"></ul>
-        </details>
-        <p id="confirm" class="confirm" hidden></p>
-        <div class="actions">
-          <button type="submit" id="run-btn">実行する</button>
-          <button type="button" id="stop-btn" class="quiet" hidden>停止</button>
-        </div>
-        <p id="form-note" class="note"></p>
-      </form>
-
-      <section id="run" hidden>
-        <p id="page-line" class="page-line"></p>
-        <article id="result" hidden>
-          <p id="result-text"></p>
-          <button type="button" id="copy-btn" class="quiet">コピー</button>
-        </article>
-        <p id="human-check" class="confirm" hidden></p>
-        <p id="user-input" class="confirm" hidden></p>
-        <button type="button" id="human-ready-btn" class="quiet" hidden>確認できた</button>
-        <button type="button" id="preview-open" aria-label="画像を全画面表示" hidden>
-          <img id="preview" alt="開いているページ" />
-        </button>
-        <ol id="steps"></ol>
-        <div id="approval" class="approval" hidden>
-          <p id="approval-text"></p>
-          <div class="actions">
-            <button type="button" id="approve-btn">実行する</button>
-            <button type="button" id="deny-btn" class="quiet">やめる</button>
-          </div>
-        </div>
+      <section class="hello">
+        <p id="greeting" class="greeting"></p>
+        <h1>ブラウザに調べものを任せる</h1>
+        <p id="greeting-sub" class="greeting-sub"></p>
       </section>
+
+      <div class="stage">
+        <div class="browser" id="browser" data-mode="idle">
+          <!-- マスコット。状態は data-mood で切り替える -->
+          <div class="jev" id="jev" data-mood="idle" aria-hidden="true">
+            <p class="jev-bubble" id="jev-bubble">何を調べましょう？</p>
+            <svg class="jev-body" viewBox="0 0 120 120">
+              <defs>
+                <radialGradient id="jev-shell" cx="38%" cy="30%" r="75%">
+                  <stop offset="0" stop-color="#ffffff" />
+                  <stop offset=".55" stop-color="#e8eef8" />
+                  <stop offset="1" stop-color="#aab6cc" />
+                </radialGradient>
+                <linearGradient id="jev-face" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0" stop-color="#2a3150" />
+                  <stop offset="1" stop-color="#151a2e" />
+                </linearGradient>
+              </defs>
+              <g class="jev-antenna">
+                <line x1="60" y1="26" x2="60" y2="10" stroke="#8a96ad" stroke-width="3" stroke-linecap="round" />
+                <circle class="jev-lamp" cx="60" cy="9" r="5" />
+              </g>
+              <ellipse cx="60" cy="114" rx="30" ry="4" fill="rgba(20,30,60,.18)" />
+              <rect x="16" y="24" width="88" height="80" rx="34" fill="url(#jev-shell)" />
+              <rect x="26" y="38" width="68" height="46" rx="22" fill="url(#jev-face)" />
+              <g class="jev-eyes" id="jev-eyes">
+                <ellipse class="jev-eye" cx="47" cy="60" rx="6" ry="8" />
+                <ellipse class="jev-eye" cx="73" cy="60" rx="6" ry="8" />
+              </g>
+              <path class="jev-mouth" d="M53 74 Q60 79 67 74" />
+              <circle cx="34" cy="74" r="4" fill="rgba(255,120,140,.45)" />
+              <circle cx="86" cy="74" r="4" fill="rgba(255,120,140,.45)" />
+              <ellipse cx="40" cy="34" rx="12" ry="5" fill="rgba(255,255,255,.8)" transform="rotate(-20 40 34)" />
+            </svg>
+          </div>
+
+          <div class="chrome">
+            <div class="tabs">
+              <span class="lights"><i></i><i></i><i></i></span>
+              <span class="tab" id="tab">
+                <span class="tab-icon"></span>
+                <span class="tab-title" id="tab-title">新しいタブ</span>
+              </span>
+              <label class="toggle" title="ブラウザのウィンドウを出さずに動かす">
+                <input type="checkbox" id="headless-toggle" />
+                <span class="switch"></span>
+                <span>ヘッドレス</span>
+              </label>
+            </div>
+
+            <form id="task-form" class="omnibox">
+              <span class="omni-icon" aria-hidden="true"></span>
+              <textarea
+                id="task-input"
+                rows="1"
+                placeholder="やりたいことを入力（例：明日の東京の天気を調べて）"
+                aria-label="やりたいこと"
+                autofocus
+              ></textarea>
+              <button type="button" id="clear-btn" class="clear-btn" title="入力をクリア" aria-label="入力をクリア" hidden>×</button>
+              <button type="button" id="stop-btn" class="stop-btn" hidden>停止</button>
+              <button type="submit" id="run-btn" class="run-btn">実行する</button>
+            </form>
+            <div class="progress" aria-hidden="true"><span></span></div>
+          </div>
+
+          <p id="confirm" class="banner warn" hidden></p>
+          <p id="form-note" class="banner error" hidden></p>
+
+          <div class="viewport">
+            <!-- 待機中：新しいタブ風のホーム -->
+            <div class="home" id="home">
+              <p class="home-title">最近の依頼</p>
+              <ul id="history-list" class="history"></ul>
+              <p class="home-empty" id="home-empty">ここに最近の依頼が並びます。上の欄に入力して Enter で始めます。</p>
+            </div>
+
+            <!-- 実行中：ページのライブ映像 -->
+            <section id="run" class="run" hidden>
+              <button type="button" id="preview-open" class="shot" aria-label="画像を全画面表示" hidden>
+                <img id="preview" alt="開いているページ" />
+              </button>
+              <div class="loading" id="loading">
+                <span class="globe"></span>
+                <p>ページを開いています</p>
+              </div>
+              <span class="scan" aria-hidden="true"></span>
+
+              <div id="approval" class="overlay" hidden>
+                <div class="sheet">
+                  <p class="sheet-title">この操作を実行してよいですか？</p>
+                  <p id="approval-text"></p>
+                  <div class="actions">
+                    <button type="button" id="approve-btn" class="primary">実行する</button>
+                    <button type="button" id="deny-btn" class="quiet">やめる</button>
+                  </div>
+                </div>
+              </div>
+
+              <div id="pause" class="overlay" hidden>
+                <div class="sheet">
+                  <p id="human-check" hidden></p>
+                  <p id="user-input" hidden></p>
+                  <div class="actions">
+                    <button type="button" id="human-ready-btn" class="primary">確認できた</button>
+                  </div>
+                </div>
+              </div>
+
+              <article id="result" class="result" hidden>
+                <p class="result-title">わかったこと</p>
+                <p id="result-text"></p>
+                <div class="actions">
+                  <button type="button" id="copy-btn" class="quiet">コピー</button>
+                  <button type="button" id="new-btn" class="quiet">新しい依頼</button>
+                </div>
+              </article>
+            </section>
+          </div>
+
+          <p id="page-line" class="statusbar">待機中</p>
+        </div>
+
+        <aside class="log" id="log" hidden>
+          <p class="log-title">操作の記録</p>
+          <ol id="steps"></ol>
+        </aside>
+      </div>
     </main>
 
     <dialog id="preview-dialog" aria-label="画像の全画面表示">

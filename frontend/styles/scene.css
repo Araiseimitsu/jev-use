@@ -1,0 +1,215 @@
+/* 背景の空。時間帯は data-time、太陽・月の位置は scene.js が --body-x / --body-y で渡す */
+
+/* 色を補間できるよう登録し、時間帯が変わるときに空がゆっくり移り変わるようにする */
+@property --sky-top { syntax: "<color>"; inherits: true; initial-value: #6cc0ef; }
+@property --sky-mid { syntax: "<color>"; inherits: true; initial-value: #a8dcf6; }
+@property --sky-low { syntax: "<color>"; inherits: true; initial-value: #e9f6fb; }
+@property --hill-back { syntax: "<color>"; inherits: true; initial-value: #8fc79a; }
+@property --hill-front { syntax: "<color>"; inherits: true; initial-value: #5fae74; }
+@property --town { syntax: "<color>"; inherits: true; initial-value: #9fb6c9; }
+
+:root {
+  --sky-top: #6cc0ef;
+  --sky-mid: #a8dcf6;
+  --sky-low: #e9f6fb;
+  --hill-back: #8fc79a;
+  --hill-front: #5fae74;
+  --town: #9fb6c9;
+  --star-opacity: 0;
+  --cloud: rgba(255, 255, 255, 0.95);
+  --body-x: 50%;
+  --body-y: 30%;
+  transition: --sky-top 4s, --sky-mid 4s, --sky-low 4s, --hill-back 4s, --hill-front 4s, --town 4s;
+}
+
+[data-time="morning"] {
+  --sky-top: #7cc6f0;
+  --sky-mid: #bfe4f4;
+  --sky-low: #fde9d2;
+  --hill-back: #9bcf9c;
+  --hill-front: #67b478;
+  --town: #a9bfd2;
+}
+
+[data-time="evening"] {
+  --sky-top: #3d4f8f;
+  --sky-mid: #d9768a;
+  --sky-low: #ffc27a;
+  --hill-back: #6a5a7c;
+  --hill-front: #45405e;
+  --town: #4b4466;
+  --star-opacity: 0.25;
+  --cloud: rgba(255, 214, 200, 0.9);
+}
+
+[data-time="night"] {
+  --sky-top: #070b24;
+  --sky-mid: #172456;
+  --sky-low: #33407a;
+  --hill-back: #1b2148;
+  --hill-front: #10142f;
+  --town: #1f2550;
+  --star-opacity: 1;
+  --cloud: rgba(150, 165, 220, 0.18);
+}
+
+.sky {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  background: linear-gradient(180deg, var(--sky-top) 0%, var(--sky-mid) 55%, var(--sky-low) 100%);
+}
+
+/* 太陽・月のまわりの光が空に広がる */
+.sky-glow {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    circle at var(--body-x) var(--body-y),
+    rgba(255, 244, 214, 0.75) 0,
+    rgba(255, 230, 180, 0.25) 14vmax,
+    transparent 34vmax
+  );
+  transition: background-position 2s;
+}
+
+[data-time="night"] .sky-glow {
+  background: radial-gradient(circle at var(--body-x) var(--body-y), rgba(190, 205, 255, 0.28) 0, transparent 22vmax);
+}
+
+.stars {
+  position: absolute;
+  inset: 0 0 30% 0;
+  opacity: var(--star-opacity);
+  transition: opacity 4s;
+  background-image:
+    radial-gradient(1.4px 1.4px at 12% 18%, #fff 50%, transparent 51%),
+    radial-gradient(1px 1px at 22% 42%, #fff 50%, transparent 51%),
+    radial-gradient(1.8px 1.8px at 31% 12%, #fff 50%, transparent 51%),
+    radial-gradient(1px 1px at 44% 30%, #fff 50%, transparent 51%),
+    radial-gradient(1.2px 1.2px at 57% 8%, #fff 50%, transparent 51%),
+    radial-gradient(1.6px 1.6px at 66% 36%, #fff 50%, transparent 51%),
+    radial-gradient(1px 1px at 74% 16%, #fff 50%, transparent 51%),
+    radial-gradient(1.3px 1.3px at 83% 44%, #fff 50%, transparent 51%),
+    radial-gradient(1.8px 1.8px at 91% 22%, #fff 50%, transparent 51%),
+    radial-gradient(1px 1px at 6% 52%, #fff 50%, transparent 51%),
+    radial-gradient(1.2px 1.2px at 38% 56%, #fff 50%, transparent 51%),
+    radial-gradient(1px 1px at 96% 60%, #fff 50%, transparent 51%);
+  animation: twinkle 5s ease-in-out infinite alternate;
+}
+
+@keyframes twinkle {
+  to { filter: brightness(0.55); }
+}
+
+/* 太陽と月は同じ位置を使い、時間帯でどちらかを見せる */
+.sky-body {
+  position: absolute;
+  left: var(--body-x);
+  top: var(--body-y);
+  width: clamp(70px, 9vw, 120px);
+  aspect-ratio: 1;
+  translate: -50% -50%;
+  transition: left 2s ease, top 2s ease;
+}
+
+.sun,
+.moon {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  transition: opacity 3s;
+}
+
+.sun {
+  background: radial-gradient(circle at 42% 40%, #fffbe8 0, #ffe58a 45%, #ffbe3d 100%);
+  box-shadow: 0 0 40px 10px rgba(255, 214, 102, 0.65), 0 0 120px 40px rgba(255, 190, 80, 0.3);
+  animation: sun-pulse 6s ease-in-out infinite;
+}
+
+[data-time="evening"] .sun {
+  background: radial-gradient(circle at 42% 40%, #fff1d6 0, #ffad6b 50%, #ff6f61 100%);
+  box-shadow: 0 0 50px 14px rgba(255, 130, 90, 0.6);
+}
+
+.moon {
+  opacity: 0;
+  background: radial-gradient(circle at 36% 34%, #ffffff 0, #e9ecf7 55%, #c4cbe3 100%);
+  box-shadow: 0 0 40px 6px rgba(200, 215, 255, 0.45);
+  /* 欠けた側は空の色で覆って三日月にする */
+  mask: radial-gradient(circle at 78% 30%, transparent 38%, #000 39%);
+}
+
+[data-time="night"] .sun { opacity: 0; }
+[data-time="night"] .moon { opacity: 1; }
+
+@keyframes sun-pulse {
+  50% { scale: 1.04; }
+}
+
+/* 雲は複数の円を重ねて形を作り、横に流す */
+.cloud {
+  position: absolute;
+  width: 220px;
+  height: 64px;
+  border-radius: 64px;
+  background: var(--cloud);
+  filter: blur(1px) drop-shadow(0 10px 18px rgba(40, 70, 120, 0.12));
+  animation: drift linear infinite;
+}
+
+.cloud::before,
+.cloud::after {
+  content: "";
+  position: absolute;
+  border-radius: 50%;
+  background: inherit;
+}
+
+.cloud::before { width: 96px; height: 96px; left: 34px; top: -48px; }
+.cloud::after { width: 70px; height: 70px; left: 112px; top: -32px; }
+
+.c1 { top: 14%; animation-duration: 95s; animation-delay: -30s; }
+.c2 { top: 30%; scale: 0.65; opacity: 0.85; animation-duration: 140s; animation-delay: -90s; }
+.c3 { top: 8%; scale: 0.45; opacity: 0.7; animation-duration: 170s; animation-delay: -10s; }
+
+@keyframes drift {
+  from { translate: -260px 0; }
+  to { translate: calc(100vw + 260px) 0; }
+}
+
+.skyline {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 100%;
+  height: 30vh;
+  min-height: 180px;
+}
+
+.hill.back { fill: var(--hill-back); }
+.hill.front { fill: var(--hill-front); }
+.town rect { fill: var(--town); }
+
+/* 窓の明かりは夕方から点き始める */
+.windows rect {
+  fill: #ffd98a;
+  opacity: 0;
+  transition: opacity 2s;
+}
+
+[data-time="evening"] .windows rect:nth-child(3n) { opacity: 0.8; }
+[data-time="night"] .windows rect { opacity: 0.9; }
+[data-time="night"] .windows rect:nth-child(4n) { animation: lamp 9s steps(1) infinite; }
+
+@keyframes lamp {
+  60% { opacity: 0.15; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cloud,
+  .stars,
+  .sun,
+  .windows rect { animation: none !important; }
+}

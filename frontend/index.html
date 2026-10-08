@@ -191,23 +191,26 @@
                 </div>
               </div>
 
-              <article id="result" class="result" hidden>
-                <p class="result-title">わかったこと</p>
-                <p id="result-text"></p>
-                <div class="actions">
-                  <button type="button" id="copy-btn" class="quiet">コピー</button>
-                  <button type="button" id="new-btn" class="quiet">新しい依頼</button>
-                </div>
-              </article>
             </section>
           </div>
 
           <p id="page-line" class="statusbar">待機中</p>
         </div>
 
-        <aside class="log" id="log" hidden>
-          <p class="log-title">操作の記録</p>
-          <ol id="steps"></ol>
+        <!-- 結果はページの映像に重ねず横に出し、スクリーンショットを隠さない -->
+        <aside class="side" id="log" hidden>
+          <article id="result" class="result" hidden>
+            <p class="result-title">わかったこと</p>
+            <p id="result-text"></p>
+            <div class="actions">
+              <button type="button" id="copy-btn" class="quiet">コピー</button>
+              <button type="button" id="new-btn" class="quiet">新しい依頼</button>
+            </div>
+          </article>
+          <section class="log">
+            <p class="log-title">操作の記録</p>
+            <ol id="steps"></ol>
+          </section>
         </aside>
       </div>
     </main>

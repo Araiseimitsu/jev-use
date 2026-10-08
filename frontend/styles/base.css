@@ -29,9 +29,13 @@
 
 html { min-height: 100%; }
 
+/* PC では縦スクロールを出さず、ヘッダーから窓の下端までを1画面に収める */
 body {
   margin: 0;
-  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
   font-family: var(--font);
   font-weight: 400;
   color: var(--ink);
@@ -108,15 +112,19 @@ button:disabled { cursor: progress; opacity: 0.6; }
 
 /* ---------- 見出し ---------- */
 main {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
   width: min(1240px, 100%);
   margin: 0 auto;
-  padding: 0 clamp(0.75rem, 3vw, 2rem) 18vh;
+  padding: 0 clamp(0.75rem, 3vw, 2rem) clamp(1rem, 4vh, 2.5rem);
 }
 
 .hello {
   text-align: center;
   color: var(--on-sky);
-  margin: 1vh 0 2.5rem;
+  margin: 0 0 clamp(1.25rem, 4vh, 2.5rem);
   text-shadow: 0 1px 3px rgba(0, 15, 40, 0.35), 0 4px 24px rgba(0, 15, 40, 0.25);
 }
 
@@ -139,23 +147,29 @@ h1 {
 
 /* 実行中は見出しを小さくして画面を広く使う */
 /* マスコットと重ならないよう左に寄せる */
-body.running .hello { margin-bottom: 1.5rem; text-align: left; }
+body.running .hello { margin-bottom: 1rem; text-align: left; }
 body.running h1 { font-size: clamp(1.15rem, 2.4vw, 1.5rem); }
 body.running .greeting-sub { display: none; }
 
 /* ---------- ブラウザ窓 ---------- */
 .stage {
+  flex: 1;
+  min-height: 0;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   gap: 1.25rem;
   align-items: start;
 }
 
-body.running .stage { grid-template-columns: minmax(0, 1fr) 320px; }
+body.running .stage { grid-template-columns: minmax(0, 1fr) 320px; align-items: stretch; }
 
 .browser {
   position: relative;
+  display: flex;
+  flex-direction: column;
   width: min(900px, 100%);
+  max-height: 100%;
   margin: 0 auto;
   border-radius: 10px;
   background: var(--toolbar);
@@ -490,12 +504,18 @@ body.running .browser { width: 100%; }
 @keyframes drop { from { opacity: 0; translate: 0 -4px; } }
 
 /* ---------- ページ表示部 ---------- */
+/* 待機中は内容なりの高さ、実行中は残りの高さをすべてページの映像に使う */
 .viewport {
   position: relative;
-  min-height: 340px;
+  flex: 0 1 340px;
+  min-height: 0;
   overflow: hidden;
   background: #fff;
 }
+
+body.running .viewport { flex: 1 1 0; }
+
+.home { height: 100%; overflow: auto; }
 
 /* 待機中は Chrome の新しいタブページのように、最近の依頼をショートカットで並べる */
 .home { padding: 2rem clamp(1rem, 4vw, 2.5rem) 2.25rem; text-align: center; }
@@ -654,22 +674,20 @@ body.running .browser { width: 100%; }
 
 .actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0.5rem; }
 
-/* 結果はページの上に下から重ねる */
+/* 結果は記録欄の上に置く。長文は欄の中でスクロールし、記録欄にも高さを残す */
 .result {
-  position: absolute;
-  left: 50%;
-  bottom: 1rem;
-  width: min(640px, calc(100% - 2rem));
-  max-height: calc(100% - 2rem);
+  flex: none;
+  width: 100%;
+  max-height: 60%;
   overflow: auto;
-  translate: -50% 0;
+  padding: 1rem 1.1rem;
   animation: slide-up 0.35s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 .result-title { color: var(--ok); }
-.result p#result-text { margin: 0 0 1rem; white-space: pre-wrap; }
+.result p#result-text { margin: 0 0 1rem; white-space: pre-wrap; font-size: 0.9rem; }
 
-@keyframes slide-up { from { opacity: 0; translate: -50% 24px; } }
+@keyframes slide-up { from { opacity: 0; translate: 0 12px; } }
 
 .statusbar {
   margin: 0;
@@ -779,10 +797,16 @@ body.running .browser { width: 100%; }
 }
 
 /* ---------- 操作の記録 ---------- */
+.side {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-height: 0;
+}
+
 .log {
-  max-height: calc(100vh - 6rem);
-  position: sticky;
-  top: 1rem;
+  flex: 1;
+  min-height: 0;
   overflow: auto;
   padding: 1rem 1rem 0.5rem;
   border-radius: 10px;
@@ -894,9 +918,16 @@ dialog img { display: block; width: 100%; }
 }
 
 /* ---------- 狭い画面 ---------- */
+/* 縦に積む幅では1画面に収まらないため、通常のスクロールに戻す */
 @media (max-width: 960px) {
+  body { height: auto; min-height: 100dvh; }
+  .stage { grid-template-rows: none; }
   body.running .stage { grid-template-columns: minmax(0, 1fr); }
-  .log { position: static; max-height: none; }
+  .browser { max-height: none; }
+  .viewport,
+  body.running .viewport { flex: none; min-height: 340px; }
+  .home { height: auto; }
+  .result { max-height: none; }
 }
 
 @media (max-width: 560px) {
@@ -912,7 +943,8 @@ dialog img { display: block; width: 100%; }
   #task-input { flex-basis: calc(100% - 3rem); }
   .run-btn, .stop-btn { flex: 1; }
   .toggle span:last-child { display: none; }
-  .viewport { min-height: 300px; }
+  .viewport,
+  body.running .viewport { min-height: 300px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

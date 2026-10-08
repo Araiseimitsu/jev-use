@@ -59,7 +59,7 @@ function loadRecentTasks() {
   }
 }
 
-// 文字列から色相を決め、履歴のサムネイルを依頼ごとに見分けやすくする
+// 文字列から色相を決め、履歴のアイコンを依頼ごとに見分けやすくする
 function hueOf(text) {
   let hash = 0;
   for (const ch of text) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
@@ -77,6 +77,7 @@ function renderRecentTasks() {
     const thumb = document.createElement("span");
     thumb.className = "thumb";
     thumb.style.setProperty("--h", hueOf(task));
+    thumb.textContent = [...task.trim()][0];
     const text = document.createElement("span");
     text.className = "text";
     text.textContent = task;

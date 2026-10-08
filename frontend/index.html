@@ -7,38 +7,36 @@
     <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
     <link rel="alternate icon" href="/icons/icon-192.png" type="image/png" sizes="192x192" />
     <link rel="apple-touch-icon" href="/icons/icon-180.png" />
-    <meta name="theme-color" content="#8fd0f2" />
-    <!-- フォントが読めない環境でもシステムの丸ゴシックで崩れないよう、読み込みは任意扱い -->
+    <meta name="theme-color" content="#2f6fb8" />
+    <!-- フォントが読めない環境でもシステムのゴシック体で崩れないよう、読み込みは任意扱い -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
       rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=Dela+Gothic+One&family=Zen+Maru+Gothic:wght@500;700;900&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&display=swap"
     />
     <link rel="stylesheet" href="/styles/scene.css" />
     <link rel="stylesheet" href="/styles/base.css" />
   </head>
   <body>
-    <!-- 背景の空。時刻に合わせて scene.js が太陽・月・色を動かす -->
+    <!-- 背景の空。時刻に合わせて scene.js が太陽・月・色を動かし、星・雲・街並みを生成する -->
     <div class="sky" aria-hidden="true">
+      <canvas class="stars" id="stars"></canvas>
       <div class="sky-glow"></div>
-      <div class="stars"></div>
-      <div class="sky-body" id="sky-body"><span class="sun"></span><span class="moon"></span></div>
-      <div class="cloud c1"></div>
-      <div class="cloud c2"></div>
-      <div class="cloud c3"></div>
-      <svg class="skyline" viewBox="0 0 1440 260" preserveAspectRatio="none">
-        <path class="hill back" d="M0 170 C 180 110 320 150 480 120 S 820 70 1000 120 S 1300 100 1440 130 V260 H0Z" />
-        <g class="town">
-          <rect x="120" y="150" width="46" height="110" /><rect x="176" y="118" width="34" height="142" />
-          <rect x="216" y="168" width="58" height="92" /><rect x="300" y="132" width="40" height="128" />
-          <rect x="980" y="140" width="52" height="120" /><rect x="1040" y="104" width="30" height="156" />
-          <rect x="1078" y="160" width="64" height="100" /><rect x="1160" y="128" width="38" height="132" />
-          <rect x="1206" y="176" width="70" height="84" />
-        </g>
-        <g class="windows" id="town-windows"></g>
-        <path class="hill front" d="M0 210 C 240 170 420 230 700 200 S 1180 170 1440 205 V260 H0Z" />
+      <div class="sky-body" id="sky-body">
+        <span class="sun"></span>
+        <canvas class="moon" id="moon" width="256" height="256"></canvas>
+      </div>
+      <div class="clouds" id="clouds"></div>
+      <svg class="skyline" id="skyline" viewBox="0 0 1600 300" preserveAspectRatio="xMidYMax slice">
+        <defs>
+          <linearGradient id="haze-grad" x1="0" y1="0" x2="0" y2="1">
+            <stop class="haze-stop" offset="0" stop-opacity="0" />
+            <stop class="haze-stop" offset="1" stop-opacity="0.75" />
+          </linearGradient>
+        </defs>
       </svg>
+      <svg class="filters" width="0" height="0"><defs id="cloud-filters"></defs></svg>
     </div>
 
     <header class="top">
@@ -60,61 +58,93 @@
             <p class="jev-bubble" id="jev-bubble">何を調べましょう？</p>
             <svg class="jev-body" viewBox="0 0 120 120">
               <defs>
-                <radialGradient id="jev-shell" cx="38%" cy="30%" r="75%">
-                  <stop offset="0" stop-color="#ffffff" />
-                  <stop offset=".55" stop-color="#e8eef8" />
-                  <stop offset="1" stop-color="#aab6cc" />
-                </radialGradient>
-                <linearGradient id="jev-face" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0" stop-color="#2a3150" />
-                  <stop offset="1" stop-color="#151a2e" />
+                <linearGradient id="jev-shell" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0" stop-color="#f6f7fa" />
+                  <stop offset=".42" stop-color="#d7dce4" />
+                  <stop offset=".8" stop-color="#9ba4b3" />
+                  <stop offset="1" stop-color="#6c7586" />
                 </linearGradient>
+                <!-- 左右の縁を暗くして丸みと金属の厚みを出す -->
+                <linearGradient id="jev-rim" x1="0" y1="0" x2="1" y2="0">
+                  <stop offset="0" stop-color="#1b2030" stop-opacity=".32" />
+                  <stop offset=".2" stop-color="#1b2030" stop-opacity="0" />
+                  <stop offset=".8" stop-color="#1b2030" stop-opacity="0" />
+                  <stop offset="1" stop-color="#1b2030" stop-opacity=".4" />
+                </linearGradient>
+                <linearGradient id="jev-face" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0" stop-color="#1c2334" />
+                  <stop offset="1" stop-color="#06080e" />
+                </linearGradient>
+                <linearGradient id="jev-metal" x1="0" y1="0" x2="1" y2="0">
+                  <stop offset="0" stop-color="#5d6676" />
+                  <stop offset=".5" stop-color="#c9ced8" />
+                  <stop offset="1" stop-color="#5d6676" />
+                </linearGradient>
+                <radialGradient id="jev-ground" cx=".5" cy=".5" r=".5">
+                  <stop offset="0" stop-color="#0a1020" stop-opacity=".35" />
+                  <stop offset="1" stop-color="#0a1020" stop-opacity="0" />
+                </radialGradient>
               </defs>
+              <ellipse cx="60" cy="113" rx="36" ry="5" fill="url(#jev-ground)" />
               <g class="jev-antenna">
-                <line x1="60" y1="26" x2="60" y2="10" stroke="#8a96ad" stroke-width="3" stroke-linecap="round" />
-                <circle class="jev-lamp" cx="60" cy="9" r="5" />
+                <rect x="58.5" y="10" width="3" height="16" rx="1.5" fill="url(#jev-metal)" />
+                <circle class="jev-lamp" cx="60" cy="9" r="4" />
+                <circle cx="58.6" cy="7.6" r="1.2" fill="rgba(255,255,255,.7)" />
               </g>
-              <ellipse cx="60" cy="114" rx="30" ry="4" fill="rgba(20,30,60,.18)" />
-              <rect x="16" y="24" width="88" height="80" rx="34" fill="url(#jev-shell)" />
-              <rect x="26" y="38" width="68" height="46" rx="22" fill="url(#jev-face)" />
+              <rect x="9" y="50" width="9" height="26" rx="3.5" fill="url(#jev-metal)" />
+              <rect x="102" y="50" width="9" height="26" rx="3.5" fill="url(#jev-metal)" />
+              <rect x="16" y="24" width="88" height="80" rx="30" fill="url(#jev-shell)" />
+              <rect x="16" y="24" width="88" height="80" rx="30" fill="url(#jev-rim)" />
+              <ellipse cx="50" cy="31" rx="24" ry="4.5" fill="rgba(255,255,255,.75)" />
+              <rect x="23.5" y="36.5" width="73" height="51" rx="21.5" fill="#4b5363" />
+              <rect x="26" y="39" width="68" height="46" rx="19" fill="url(#jev-face)" />
               <g class="jev-eyes" id="jev-eyes">
-                <ellipse class="jev-eye" cx="47" cy="60" rx="6" ry="8" />
-                <ellipse class="jev-eye" cx="73" cy="60" rx="6" ry="8" />
+                <ellipse class="jev-eye" cx="47" cy="60" rx="5.5" ry="7" />
+                <ellipse class="jev-eye" cx="73" cy="60" rx="5.5" ry="7" />
               </g>
               <path class="jev-mouth" d="M53 74 Q60 79 67 74" />
-              <circle cx="34" cy="74" r="4" fill="rgba(255,120,140,.45)" />
-              <circle cx="86" cy="74" r="4" fill="rgba(255,120,140,.45)" />
-              <ellipse cx="40" cy="34" rx="12" ry="5" fill="rgba(255,255,255,.8)" transform="rotate(-20 40 34)" />
+              <!-- 前面ガラスの映り込み -->
+              <path d="M30 56 Q31 42 46 41 L66 41 Q44 45 30 56 Z" fill="rgba(255,255,255,.14)" />
             </svg>
           </div>
 
           <div class="chrome">
             <div class="tabs">
-              <span class="lights"><i></i><i></i><i></i></span>
               <span class="tab" id="tab">
                 <span class="tab-icon"></span>
                 <span class="tab-title" id="tab-title">新しいタブ</span>
+                <span class="tab-x" aria-hidden="true"></span>
               </span>
+              <span class="tab-new" aria-hidden="true"></span>
               <label class="toggle" title="ブラウザのウィンドウを出さずに動かす">
                 <input type="checkbox" id="headless-toggle" />
                 <span class="switch"></span>
                 <span>ヘッドレス</span>
               </label>
+              <span class="winctl" aria-hidden="true"><i class="min"></i><i class="max"></i><i class="close"></i></span>
             </div>
 
-            <form id="task-form" class="omnibox">
-              <span class="omni-icon" aria-hidden="true"></span>
-              <textarea
-                id="task-input"
-                rows="1"
-                placeholder="やりたいことを入力（例：明日の東京の天気を調べて）"
-                aria-label="やりたいこと"
-                autofocus
-              ></textarea>
-              <button type="button" id="clear-btn" class="clear-btn" title="入力をクリア" aria-label="入力をクリア" hidden>×</button>
-              <button type="button" id="stop-btn" class="stop-btn" hidden>停止</button>
-              <button type="submit" id="run-btn" class="run-btn">実行する</button>
-            </form>
+            <div class="toolbar">
+              <!-- 戻る・進む・再読み込みは見た目だけの飾り -->
+              <span class="nav" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M20 11H7.8l5.6-5.6L12 4l-8 8 8 8 1.4-1.4L7.8 13H20z" /></svg>
+                <svg viewBox="0 0 24 24"><path d="M4 11h12.2l-5.6-5.6L12 4l8 8-8 8-1.4-1.4 5.6-5.6H4z" /></svg>
+                <svg viewBox="0 0 24 24"><path d="M17.65 6.35A7.95 7.95 0 0 0 12 4a8 8 0 1 0 7.73 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4z" /></svg>
+              </span>
+              <form id="task-form" class="omnibox">
+                <svg class="omni-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M15.5 14h-.79l-.28-.27A6.5 6.5 0 1 0 14 15.5l.27.28v.79l5 4.99L20.49 19zm-6 0a4.5 4.5 0 1 1 0-9 4.5 4.5 0 0 1 0 9z" /></svg>
+                <textarea
+                  id="task-input"
+                  rows="1"
+                  placeholder="やりたいことを入力（例：明日の東京の天気を調べて）"
+                  aria-label="やりたいこと"
+                  autofocus
+                ></textarea>
+                <button type="button" id="clear-btn" class="clear-btn" title="入力をクリア" aria-label="入力をクリア" hidden>×</button>
+                <button type="button" id="stop-btn" class="stop-btn" hidden>停止</button>
+                <button type="submit" id="run-btn" class="run-btn">実行する</button>
+              </form>
+            </div>
             <div class="progress" aria-hidden="true"><span></span></div>
           </div>
 
@@ -135,7 +165,7 @@
                 <img id="preview" alt="開いているページ" />
               </button>
               <div class="loading" id="loading">
-                <span class="globe"></span>
+                <span class="spinner"></span>
                 <p>ページを開いています</p>
               </div>
               <span class="scan" aria-hidden="true"></span>

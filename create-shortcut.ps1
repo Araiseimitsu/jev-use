@@ -25,8 +25,8 @@ $link.TargetPath = $target
 $link.WorkingDirectory = $PSScriptRoot
 $link.IconLocation = "$icon,0"
 $link.Description = "jev-use を起動してブラウザで開く"
-# 7 = 最小化。起動中の黒いウィンドウを目立たせない
-$link.WindowStyle = 7
+# 1 = 通常。起動中のシェル（ログ）を表示したままにする
+$link.WindowStyle = 1
 $link.Save()
 
 Write-Host "ショートカットを作成しました: $linkPath" -ForegroundColor Green

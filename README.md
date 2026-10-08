@@ -62,7 +62,7 @@ Windows ではプロジェクトルートの `start.cmd`（または `start.ps1`
 
 `create-shortcut.cmd` をダブルクリックすると、アイコン付きの `jev-use` ショートカットがデスクトップにできます。ダブルクリックで `start.cmd` と同じ起動をします。
 ショートカットは置き場所の絶対パスを持つため Git には含めず、PC ごとにこのスクリプトで作ります。フォルダを移したときも、もう一度実行すれば作り直せます。作成先を変えるときは `create-shortcut.cmd -Folder "C:\出力先"` とします。
-アイコンは `frontend/icons/icon.ico`（`icon-512.png` から作った複数サイズの ICO）です。
+アイコンは `frontend/icons/icon.ico`（`icon.svg` から描いた、角の外側が透明な複数サイズの ICO）です。
 
 ### 停止
 

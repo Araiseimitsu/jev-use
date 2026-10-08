@@ -3,7 +3,8 @@
 ## 2026-10-08 — アイコン付きの起動ショートカット
 
 - 背景: どの PC でもダブルクリックで起動できるようにしたい。
-- 変更: `create-shortcut.cmd`（実体は `create-shortcut.ps1`）が、スクリプトの置き場所から `start.cmd` へのショートカットをデスクトップに作る。アイコンは `frontend/icons/icon.ico`（`icon-512.png` から 16〜256px の PNG 入り ICO として生成）。起動中のウィンドウは最小化で開く。
+- 変更: `create-shortcut.cmd`（実体は `create-shortcut.ps1`）が、スクリプトの置き場所から `start.cmd` へのショートカットをデスクトップに作る。アイコンは `frontend/icons/icon.ico`（`icon.svg` から 16〜256px の PNG 入り ICO として生成）。
+- 修正: 初回は不透明の `icon-512.png` から ICO を作ったため、大きく表示すると角丸の四隅に白が残った。`icon.svg` から透明背景で描き直し、`icon.ico`・`icon-192.png`・`icon-512.png` を差し替えた。`icon-180.png`（apple-touch-icon）は iOS が角を丸めるため、不透明のまま変えていない。起動中のウィンドウは最小化で開く。
 - 判断: `.lnk` は絶対パスを持つので Git に入れず、PC ごとに生成する。`.ico` は小さな固定ファイルのため Git 管理する。
 - 検証: 一時フォルダへ作成し、リンク先・作業フォルダ・アイコン・ウィンドウ状態を読み戻して確認。ショートカットからの実起動と、別 PC での実行は未確認。
 

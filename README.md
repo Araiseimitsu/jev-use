@@ -58,6 +58,12 @@ uv run uvicorn app.main:app --reload --app-dir src
 ブラウザで [http://127.0.0.1:8000](http://127.0.0.1:8000) を開きます。
 Windows ではプロジェクトルートの `start.cmd`（または `start.ps1`）でも起動できます（ポート 8010、同じ LAN の端末からも接続できる設定で起動します）。バックグラウンドで常駐するため、ウィンドウはすぐ閉じます。
 
+### ショートカット（Windows）
+
+`create-shortcut.cmd` をダブルクリックすると、アイコン付きの `jev-use` ショートカットがデスクトップにできます。ダブルクリックで `start.cmd` と同じ起動をします。
+ショートカットは置き場所の絶対パスを持つため Git には含めず、PC ごとにこのスクリプトで作ります。フォルダを移したときも、もう一度実行すれば作り直せます。作成先を変えるときは `create-shortcut.cmd -Folder "C:\出力先"` とします。
+アイコンは `frontend/icons/icon.ico`（`icon-512.png` から作った複数サイズの ICO）です。
+
 ### 停止
 
 `start.cmd` で起動した Backend はタスクマネージャーではなく、以下のいずれかで停止します。

@@ -18,6 +18,9 @@
   --on-sky: #ffffff;
   --font: "Noto Sans JP", "Yu Gothic UI", "Hiragino Sans", "Meiryo", sans-serif;
   --window-shadow: 0 0 0 1px rgba(10, 20, 40, 0.08), 0 2px 6px rgba(10, 20, 40, 0.12), 0 24px 60px rgba(10, 20, 40, 0.3);
+  /* マスコットが窓の上にはみ出す高さと、右端から吹き出しの左端までの幅。見出しをこの範囲に入れない */
+  --jev-rise: 80px;
+  --jev-reach: 390px;
   --pop-shadow: 0 1px 3px rgba(60, 64, 67, 0.3), 0 8px 24px rgba(60, 64, 67, 0.22);
 }
 
@@ -124,7 +127,7 @@ main {
 .hello {
   text-align: center;
   color: var(--on-sky);
-  margin: 0 0 clamp(1.25rem, 4vh, 2.5rem);
+  margin: 0 0 calc(var(--jev-rise) + 0.5rem);
   text-shadow: 0 1px 3px rgba(0, 15, 40, 0.35), 0 4px 24px rgba(0, 15, 40, 0.25);
 }
 
@@ -145,9 +148,13 @@ h1 {
   letter-spacing: 0.04em;
 }
 
-/* 実行中は見出しを小さくして画面を広く使う */
-/* マスコットと重ならないよう左に寄せる */
-body.running .hello { margin-bottom: 1rem; text-align: left; }
+/* 実行中は見出しを小さくして画面を広く使う。
+   縦に場所を取らないよう、マスコットと吹き出しの横に並べて左に寄せる。右の記録欄の幅も避ける */
+body.running .hello {
+  margin-bottom: 1rem;
+  padding-right: calc(320px + 1.25rem + var(--jev-reach));
+  text-align: left;
+}
 body.running h1 { font-size: clamp(1.15rem, 2.4vw, 1.5rem); }
 body.running .greeting-sub { display: none; }
 
@@ -706,7 +713,7 @@ body.running .viewport { flex: 1 1 0; }
 .jev {
   position: absolute;
   right: 40px;
-  top: -80px;
+  top: calc(-1 * var(--jev-rise));
   z-index: 2;
   width: 88px;
   pointer-events: none;
@@ -923,6 +930,8 @@ dialog img { display: block; width: 100%; }
   body { height: auto; min-height: 100dvh; }
   .stage { grid-template-rows: none; }
   body.running .stage { grid-template-columns: minmax(0, 1fr); }
+  /* 縦に積む幅では横に並べる余裕がないため、マスコットの高さ分を空ける */
+  body.running .hello { padding-right: 0; margin-bottom: calc(var(--jev-rise) + 0.5rem); }
   .browser { max-height: none; }
   .viewport,
   body.running .viewport { flex: none; min-height: 340px; }
@@ -931,9 +940,9 @@ dialog img { display: block; width: 100%; }
 }
 
 @media (max-width: 560px) {
-  .hello { margin-bottom: 4.5rem; }
+  :root { --jev-rise: 62px; }
   h1 { font-size: 1.5rem; }
-  .jev { width: 68px; top: -62px; right: 14px; }
+  .jev { width: 68px; right: 14px; }
   .jev-bubble { max-width: 180px; }
   .tab { width: auto; flex: 1; }
   .tab-new,

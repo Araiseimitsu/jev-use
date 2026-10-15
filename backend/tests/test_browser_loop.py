@@ -7,6 +7,7 @@ import pytest
 from app.core.config import settings
 from app.services.browser_agent import BrowserAgentRunner
 from app.services.jev.browser_decider import Decision
+from app.services.jev.icon_recognizer import IconRecognizer
 from app.services.page_state import Element, PageView, SelectChoice, rank_elements
 
 
@@ -58,6 +59,9 @@ class FakeSession:
 
     async def preview_jpeg(self) -> None:
         self.previews += 1
+        return None
+
+    async def icon_png(self, element_id: str) -> None:
         return None
 
     async def close(self) -> None:
@@ -559,6 +563,39 @@ def test_high_risk_without_approval_does_not_click(monkeypatch) -> None:
     assert session.actions == []
     assert any(event["event"] == "confirm_request" for event in events)
     assert "承認" in events[-1]["data"]["result"]
+
+
+def test_icon_hint_reaches_decider_but_does_not_bypass_approval(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "typesafe_icon_recognition", True)
+    monkeypatch.setattr(settings, "approval_timeout_seconds", 5)
+    monkeypatch.setattr(settings, "typesafe_risk_threshold", 0.7)
+
+    class IconSession(FakeSession):
+        async def icon_png(self, element_id):
+            return "aWNvbg=="
+
+    class Recognizer(IconRecognizer):
+        async def recognize(self, client, png):
+            return "送信"
+
+    class Decider(ScriptedDecider):
+        async def decide(self, task, view, options, history=(), **kwargs):
+            self.options = options
+            return await super().decide(task, view, options, history, **kwargs)
+
+    view = PageView(VIEW.url, "チャット", "", (
+        Element("e1", "button", "アイコンのボタン", "click"),
+    ))
+    session = IconSession(view)
+    decider = Decider([_decision("click:e1", risk=0.95)])
+    runner = BrowserAgentRunner(
+        "ボタンを確認して", decider=decider, writer=FakeWriter(), session_factory=lambda: session,
+        icon_recognizer=Recognizer(api_key="test-key"),
+    )
+    events = _events(runner)
+    assert any("画像の推定: 送信" in option.description for option in decider.options)
+    assert session.actions == []
+    assert any(event["event"] == "confirm_request" for event in events)
 
 
 def test_fallback_stops_without_an_action() -> None:

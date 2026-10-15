@@ -1,6 +1,8 @@
 """実ブラウザで入力欄への反映を確認する。"""
 
 import asyncio
+import base64
+import struct
 
 import pytest
 from playwright.async_api import async_playwright
@@ -58,6 +60,54 @@ def _with_page(html: str, check) -> None:
                 await browser.close()
 
     asyncio.run(exercise())
+
+
+def test_icon_capture_draws_only_geometry_without_page_pixels_or_text() -> None:
+    async def check(session: BrowserSession, page) -> None:
+        await page.set_content(
+            '<p>秘密の本文と個人名</p><input value="秘密の入力値">'
+            '<button data-jev-use-id="icon" style="background:red">'
+            '<svg viewBox="0 0 24 24" width="24" height="24">'
+            '<title>秘密のタイトル</title><path d="M2 2 L22 12 L2 22 Z"/></svg></button>'
+        )
+        first = await session.icon_png("icon")
+        assert first is not None
+        # ページやタイトルが変わっても、同じ図形なら送信画像は同じ。
+        await page.locator("p").evaluate("el => el.textContent = '別の個人名'")
+        await page.locator("input").fill("別の入力値")
+        await page.locator("title").evaluate("el => el.textContent = '別のタイトル'")
+        await page.locator("button").evaluate("el => el.style.background = 'blue'")
+        assert await session.icon_png("icon") == first
+        data = base64.b64decode(first)
+        assert data[:8] == b'\x89PNG\r\n\x1a\n'
+        assert struct.unpack('>II', data[16:24]) == (280, 280)
+        # データが透明な空画像でないことも確かめる。
+        colors = await page.evaluate("""async png => {
+          const image = new Image(); image.src = 'data:image/png;base64,' + png;
+          await image.decode(); const canvas = document.createElement('canvas');
+          canvas.width = canvas.height = 280; const ctx = canvas.getContext('2d');
+          ctx.drawImage(image, 0, 0); return [Array.from(ctx.getImageData(140,140,1,1).data),
+            Array.from(ctx.getImageData(0,0,1,1).data)];
+        }""", first)
+        assert colors == [[0, 0, 0, 255], [255, 255, 255, 255]]
+    _with_page("", check)
+
+
+@pytest.mark.parametrize("content", [
+    '<text x="0" y="12">個人名</text>',
+    '<foreignObject width="24" height="24"><div>秘密</div></foreignObject>',
+    '<image href="https://private.example/avatar.png" width="24" height="24"/>',
+    '<use href="https://private.example/sprite.svg#icon"/>',
+    '<script>0</script>',
+])
+def test_icon_capture_rejects_text_embedded_images_and_external_references(content) -> None:
+    async def check(session: BrowserSession, page) -> None:
+        await page.set_content(
+            '<button data-jev-use-id="icon"><svg viewBox="0 0 24 24" width="24" height="24">'
+            + content + '</svg></button>'
+        )
+        assert await session.icon_png("icon") is None
+    _with_page("", check)
 
 
 def test_read_keeps_inputs_below_many_links_and_off_screen() -> None:

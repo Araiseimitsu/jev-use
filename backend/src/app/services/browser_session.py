@@ -1,6 +1,6 @@
 """Playwright でページを読み、選ばれた要素を操作する。
 
-判断には使わない。スクショは人が見るプレビューだけで、モデルには送らない。
+スクショは人が見るプレビュー専用。匿名アイコンは図形だけを独立した画像にできる。
 """
 
 import base64
@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from app.core.config import settings
+from app.services.icon_capture import ICON_PNG_SCRIPT
 from app.services.page_state import PageView, page_view_from_raw
 
 logger = logging.getLogger(__name__)
@@ -418,6 +419,14 @@ class BrowserSession:
 
     async def wait(self) -> None:
         await self._page.wait_for_timeout(1000)
+
+    async def icon_png(self, element_id: str) -> str | None:
+        """ページの画素を含めず、単純な SVG アイコンだけを描き直す。"""
+        try:
+            return await self._locator(element_id).evaluate(ICON_PNG_SCRIPT, timeout=2000)
+        except Exception:
+            logger.warning("アイコンを取得できなかったため、画像判定を省略します")
+            return None
 
     async def preview_jpeg(self) -> str | None:
         """人が見るプレビュー。失敗しても操作は続ける。"""

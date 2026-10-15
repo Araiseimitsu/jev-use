@@ -33,6 +33,8 @@ class Settings(BaseSettings):
     typesafe_api_key: str = ""
     typesafe_model: str = "jev-1.13.0"
     typesafe_timeout_seconds: float = 10.0
+    # 匿名ボタンの SVG 図形だけを画像にして判定する（ページの画素は送らない）。
+    typesafe_icon_recognition: bool = True
     # この確率以上の操作は、人間の確認がなければ実行しない
     typesafe_risk_threshold: float = 0.7
     # 人間の承認を待つ上限（秒）。超えたら実行しない

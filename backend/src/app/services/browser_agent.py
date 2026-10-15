@@ -1,6 +1,6 @@
 """DOM を読んで Jev が次の一手を選び、Playwright が実行するブラウザ操作ランナー。
 
-スクショは人が見るプレビューにだけ使い、次の操作の決定には使わない。
+スクショは人が見るプレビュー専用。匿名アイコンの図形だけを画像判定して候補を補う。
 """
 
 import asyncio
@@ -20,6 +20,7 @@ from app.core.config import settings
 from app.services.browser_session import BrowserSession
 from app.services.jev.asker import MISSING_KEY_MESSAGE
 from app.services.jev.browser_decider import SAFE_ACTIONS, BrowserDecider, Decision
+from app.services.jev.icon_recognizer import IconRecognizer
 from app.services.page_state import (
     ActionOption,
     Element,
@@ -102,12 +103,14 @@ class BrowserAgentRunner:
         decider: BrowserDecider | None = None,
         writer: TextWriter | None = None,
         session_factory: Callable[[], Any] | None = None,
+        icon_recognizer: IconRecognizer | None = None,
     ) -> None:
         self.task = task.strip()
         self.max_steps = max_steps or settings.default_max_steps
         self.headless = settings.browser_headless if headless is None else headless
         self.decider = decider or BrowserDecider()
         self.writer = writer or TextWriter()
+        self.icon_recognizer = icon_recognizer or IconRecognizer()
         self._session_factory = session_factory or (lambda: BrowserSession(headless=self.headless))
         self._stop_event = threading.Event()
         self._approval_event = threading.Event()
@@ -294,6 +297,8 @@ class BrowserAgentRunner:
                 await session.wait()
                 continue
             submit = self._submit_after_input(view)
+            if submit is None:
+                options = await self.icon_recognizer.enrich(client, session, view, options)
             decision = submit[0] if submit else await self.decider.decide(
                 self.task_for_model(), view, options, tuple(self._history), client=client
             )
